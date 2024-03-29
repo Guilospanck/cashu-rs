@@ -1,5 +1,5 @@
+use std::error::Error;
 use std::result;
-use std::{collections::HashMap, error::Error};
 
 use bitcoin::{
   key::Secp256k1,
@@ -180,13 +180,6 @@ impl Wallet {
   }
 }
 
-fn generate_private_key() -> SecretKey {
-  let mut random: StdRng = SeedableRng::from_entropy();
-  let secp = Secp256k1::new();
-  let (secret_key, _) = secp.generate_keypair(&mut random);
-  secret_key
-}
-
 const DOMAIN_SEPARATOR: &[u8] = "Secp256k1_HashToCurve_Cashu_".as_bytes();
 
 fn sha256_hasher(data: Vec<u8>) -> Vec<u8> {
@@ -217,30 +210,11 @@ fn hash_to_curve(x: Vec<u8>) -> PublicKey {
   }
 }
 
-fn get_point_on_curve(data: Vec<u8>) -> PublicKey {
-  let mut message = data;
-  loop {
-    // If the public key is valid, return it
-    if let Ok(x_only_pubkey) = XOnlyPublicKey::from_slice(&message) {
-      return PublicKey::from_x_only_public_key(x_only_pubkey, Parity::Even);
-    };
-    // Otherwise, hash the message again and repeat
-    message = sha256_hasher(message);
-  }
-}
-
 fn generate_key_pair() -> (SecretKey, PublicKey) {
   let mut random: StdRng = SeedableRng::from_entropy();
   let secp = Secp256k1::new();
   let pair = secp.generate_keypair(&mut random);
   pair
-}
-
-fn get_public_key_from_private_key(private_key: Vec<u8>) -> PublicKey {
-  let secp = Secp256k1::new();
-  let secret_key = SecretKey::from_slice(&private_key).expect("32 bytes, within curve order");
-  let public_key = PublicKey::from_secret_key(&secp, &secret_key);
-  public_key
 }
 
 #[cfg(test)]
