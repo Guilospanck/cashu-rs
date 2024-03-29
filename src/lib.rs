@@ -39,12 +39,13 @@ struct BlindSignature {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Mint {
-  #[serde(rename = "K")]
   secretkey: SecretKey,
+  #[serde(rename = "K")]
   pub pubkey: PublicKey,
 }
 
 impl Mint {
+  // Publishes its public key `K`.
   fn new() -> Self {
     let keypair = generate_key_pair();
 
@@ -54,6 +55,7 @@ impl Mint {
     }
   }
 
+  // Signs message
   fn mint_or_swap_tokens(&self, message: BlindedMessage) -> Result<BlindSignature> {
     let BlindedMessage { b, id, amount } = message;
 
@@ -81,17 +83,45 @@ impl Mint {
 struct Wallet {}
 
 impl Wallet {
+  fn new() -> Self {
+    Self{}
+  }
+
   // Protocol
-  fn begin() {
+  fn begin(&self) {
     // Mint Bob publishes public key K = kG
     let mint = Mint::new();
 
-    // Alice picks secret x and computes Y = hash_to_curve(x)
-    let wallet_secret_message = b"random-wallet-secret-message"; // x
-    let y = hash_to_curve(wallet_secret_message.to_vec());
+    // Picks secret x
+    let x = b"random-wallet-secret-message"; // x
 
-    // Get r, the blinding factor. r \in [0, (p-1)/2) <- part of the cureve
+    // Get r, the blinding factor. r \in [0, (p-1)/2) <- part of the curve
     let (blinding_factor, _) = generate_key_pair();
+
+    // Computes `B_ = Y + rG`, with r being a random blinding factor (blinding)
+    let blinded_message = self.blind(x.to_vec(), blinding_factor);
+
+    // Alice sends to Bob:
+    let blind_signature: BlindSignature;
+    match mint.mint_or_swap_tokens(blinded_message) {
+      Ok(value) => blind_signature = value,
+      Err(e) => return eprintln!("Could not mint token: {e}"),
+    }
+
+    // Unblinds signature
+    let c = self.unblind(&mint, blind_signature, blinding_factor);
+
+    // Alice can take the pair (x, C) as a token and can send it to Carol.
+    let token = (x, c);
+
+    // verification
+    let is_verified = mint.verification(token.0.to_vec(), token.1);
+    println!("{}", is_verified);
+  }
+
+  fn blind(&self, x: Vec<u8>, blinding_factor: SecretKey) -> BlindedMessage {
+    // Computes Y = hash_to_curve(x)
+    let y = hash_to_curve(x.to_vec());
 
     let secp = Secp256k1::new();
     let blinding_factor_scalar = Scalar::from(blinding_factor);
@@ -106,15 +136,19 @@ impl Wallet {
       id: "first#test".to_string(),
     };
 
-    // Alice sends to Bob: B_ = Y + rG with r being a random blinding factor (blinding)
-    let blind_signature: BlindSignature;
-    match mint.mint_or_swap_tokens(blinded_message) {
-      Ok(value) => blind_signature = value,
-      Err(e) => return eprintln!("Could not mint token: {e}"),
-    }
+    blinded_message
+  }
 
+  fn unblind(
+    &self,
+    mint: &Mint,
+    blind_signature: BlindSignature,
+    blinding_factor: SecretKey,
+  ) -> PublicKey {
     // Alice can calculate the unblinded key as C_ - rK = kY + krG - krG = kY = C (unblinding)
     let secp = Secp256k1::new();
+    // calculate scalar of blinding_factor
+    let blinding_factor_scalar = Scalar::from(blinding_factor);
     // calculate rK
     let rk = mint
       .pubkey
@@ -126,12 +160,7 @@ impl Wallet {
       .combine(&rk.negate(&secp))
       .expect("EC combine math error");
 
-    // Alice can take the pair (x, C) as a token and can send it to Carol.
-    let token = (wallet_secret_message, c);
-
-    // verification
-    let is_verified = mint.verification(token.0.to_vec(), token.1);
-    println!("{}", is_verified);
+    c
   }
 }
 
@@ -204,7 +233,8 @@ mod tests {
 
   #[test]
   fn it_works() {
-    Wallet::begin();
+    let wallet = Wallet::new();
+    wallet.begin();
     assert!(true);
   }
 }
