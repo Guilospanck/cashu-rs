@@ -29,8 +29,7 @@ pub fn hash_to_curve(x: Vec<u8>) -> PublicKey {
 pub fn generate_key_pair() -> (SecretKey, PublicKey) {
   let mut random: StdRng = SeedableRng::from_entropy();
   let secp = Secp256k1::new();
-  let pair = secp.generate_keypair(&mut random);
-  pair
+  secp.generate_keypair(&mut random)
 }
 
 fn _get_hashed_value(msg: Vec<u8>, counter: u32) -> Vec<u8> {

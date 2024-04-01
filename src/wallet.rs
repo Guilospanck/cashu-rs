@@ -30,11 +30,10 @@ impl Wallet {
     let blinded_message = self.blind(x.to_vec(), blinding_factor);
 
     // Alice sends blinded message to Bob
-    let blind_signature: BlindSignature;
-    match mint.mint_or_swap_tokens(blinded_message) {
-      Ok(value) => blind_signature = value,
+    let blind_signature: BlindSignature = match mint.mint_or_swap_tokens(blinded_message) {
+      Ok(value) => value,
       Err(e) => return eprintln!("Could not mint token: {e}"),
-    }
+    };
 
     // Unblinds signature
     let c = self.unblind(&mint, blind_signature, blinding_factor);
@@ -58,13 +57,11 @@ impl Wallet {
       .add_exp_tweak(&secp, &blinding_factor_scalar) // y + rG
       .expect("EC math could not add_exp_tweak");
 
-    let blinded_message = BlindedMessage {
+    BlindedMessage {
       amount: 10,
       b: b_,
       id: hex::encode(x),
-    };
-
-    blinded_message
+    }
   }
 
   pub fn unblind(
@@ -83,11 +80,9 @@ impl Wallet {
       .mul_tweak(&secp, &blinding_factor_scalar)
       .expect("EC math could not mul_tweak");
     // calculate C = C_ - rK
-    let c = blind_signature
+    blind_signature
       .c
       .combine(&rk.negate(&secp))
-      .expect("EC math combine math error");
-
-    c
+      .expect("EC math combine math error")
   }
 }

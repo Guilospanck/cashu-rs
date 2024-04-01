@@ -62,12 +62,12 @@ impl CashuToken {
     if encoded.starts_with(Self::URI_PREFIX) {
       let pat = format!("{}{}{}", Self::URI_PREFIX, Self::PREFIX, Self::VERSION);
       let b64 = encoded.trim_start_matches(&pat);
-      let json = URL_SAFE.decode(&b64).ok()?;
+      let json = URL_SAFE.decode(b64).ok()?;
       serde_json::from_slice(&json).ok()
     } else if encoded.starts_with(Self::PREFIX) {
       let pat = format!("{}{}", Self::PREFIX, Self::VERSION);
       let b64 = encoded.trim_start_matches(&pat);
-      let json = URL_SAFE.decode(&b64).ok()?;
+      let json = URL_SAFE.decode(b64).ok()?;
       serde_json::from_slice(&json).ok()
     } else {
       None

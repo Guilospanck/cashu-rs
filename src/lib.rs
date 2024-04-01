@@ -1,3 +1,4 @@
+#![allow(dead_code)] // TODO: remove
 mod types;
 mod token;
 mod helpers;
