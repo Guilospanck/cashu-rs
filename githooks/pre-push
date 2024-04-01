@@ -1,0 +1,7 @@
+#!/bin/sh
+
+set -eu
+
+just test
+
+exit 0

@@ -1,0 +1,7 @@
+#!/bin/sh
+
+set -eu
+
+just clippy
+
+exit 0
