@@ -48,12 +48,7 @@ impl Mint {
     // calculate C_ = kB_
     let c_ = match b.mul_tweak(&secp, &scalar) {
       Ok(c) => c,
-      Err(e) => {
-        return Err(MintError::InvalidECMath(format!(
-          "[mul_tweak|mint] {}",
-          e.to_string()
-        )))
-      }
+      Err(e) => return Err(MintError::InvalidECMath(format!("[mul_tweak|mint] {}", e))),
     };
 
     // Bob sends back to Alice blinded key (promise): C_ = kB_ (these two steps are the DH -blind- key exchange) (signing)
@@ -71,7 +66,7 @@ impl Mint {
       Err(e) => {
         return Err(MintError::InvalidECMath(format!(
           "[mul_tweak|verification] {}",
-          e.to_string()
+          e
         )))
       }
     };

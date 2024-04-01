@@ -62,7 +62,7 @@ impl Wallet {
     };
 
     // Unblinds signature
-    let c = match self.unblind(&mint, blind_signature, blinding_factor){
+    let c = match self.unblind(&mint, blind_signature, blinding_factor) {
       Ok(value) => value,
       Err(e) => return Err(WalletError::UnblindError(e.to_string())),
     };
@@ -93,7 +93,7 @@ impl Wallet {
       Err(e) => {
         return Err(WalletError::InvalidECMath(format!(
           "[mul_tweak|blind] {}",
-          e.to_string()
+          e
         )))
       }
     };
@@ -121,7 +121,7 @@ impl Wallet {
       Err(e) => {
         return Err(WalletError::InvalidECMath(format!(
           "[mul_tweak|unblind] {}",
-          e.to_string()
+          e
         )))
       }
     };
@@ -129,12 +129,10 @@ impl Wallet {
     // calculate C = C_ - rK
     match blind_signature.c.combine(&rk.negate(&secp)) {
       Ok(value) => Ok(value),
-      Err(e) => {
-        return Err(WalletError::InvalidECMath(format!(
-          "[combine_negate|unblind] {}",
-          e.to_string()
-        )))
-      }
+      Err(e) => Err(WalletError::InvalidECMath(format!(
+        "[combine_negate|unblind] {}",
+        e
+      ))),
     }
   }
 }
