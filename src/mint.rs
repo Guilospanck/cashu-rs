@@ -4,22 +4,19 @@ use serde::{Deserialize, Serialize};
 
 use bitcoin::{
   key::Secp256k1,
-  secp256k1::{PublicKey, SecretKey, Scalar},
+  secp256k1::{PublicKey, Scalar, SecretKey},
 };
 
-use crate::{helpers::{generate_key_pair, hash_to_curve}, types::{BlindSignature, BlindedMessage}};
+use crate::{
+  helpers::{generate_key_pair, hash_to_curve},
+  types::{BlindSignature, BlindedMessage},
+};
 
 /// [`Mint`] error
 #[derive(thiserror::Error, Debug)]
 pub enum MintError {
-  #[error("Invalid URL params: `{0}`")]
-  InvalidURLParams(String),
-  #[error("Bad request: `{0}`")]
-  BadRequest(String),
-  #[error("API error: `{0}`")]
-  APIError(String),
-  #[error("JSON parse error: `{0}`")]
-  JSONParseError(String),
+  #[error("Invalid EC math: `{0}`")]
+  InvalidECMath(String),
 }
 
 type Result<T> = result::Result<T, MintError>;
@@ -49,19 +46,36 @@ impl Mint {
     let secp = Secp256k1::new();
     let scalar = Scalar::from(self.secretkey);
     // calculate C_ = kB_
-    let c_ = b.mul_tweak(&secp, &scalar).expect("EC math could not mul_tweak");
+    let c_ = match b.mul_tweak(&secp, &scalar) {
+      Ok(c) => c,
+      Err(e) => {
+        return Err(MintError::InvalidECMath(format!(
+          "[mul_tweak|mint] {}",
+          e.to_string()
+        )))
+      }
+    };
 
     // Bob sends back to Alice blinded key (promise): C_ = kB_ (these two steps are the DH -blind- key exchange) (signing)
     Ok(BlindSignature { amount, id, c: c_ })
   }
 
   // checks that k*hash_to_curve(x) == C
-  pub fn verification(&self, x: Vec<u8>, c: PublicKey) -> bool {
+  pub fn verification(&self, x: Vec<u8>, c: PublicKey) -> Result<bool> {
     let y = hash_to_curve(x);
     let secp = Secp256k1::new();
     let scalar = Scalar::from(self.secretkey);
     // calculate kY
-    let ky = y.mul_tweak(&secp, &scalar).expect("EC math could not mul_tweak");
-    c == ky
+    let ky = match y.mul_tweak(&secp, &scalar) {
+      Ok(value) => value,
+      Err(e) => {
+        return Err(MintError::InvalidECMath(format!(
+          "[mul_tweak|verification] {}",
+          e.to_string()
+        )))
+      }
+    };
+
+    Ok(c == ky)
   }
 }
