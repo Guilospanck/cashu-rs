@@ -7,3 +7,7 @@ Work in progress.
 ## NUTs implemented
 
 - [x] [NUT-00](https://github.com/cashubtc/nuts/blob/main/00.md)
+
+## TODO
+
+Implement the mint server. Right now it is using it as a "library".
