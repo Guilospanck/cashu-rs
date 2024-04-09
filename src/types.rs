@@ -68,9 +68,10 @@ pub enum Unit {
 }
 
 /*
-/// A set of all K for a set of amounts is called a keyset.
+/// A set of all Ks for a set of amounts is called a keyset.
 ///
-/// Each keyset is identified by its keyset id. The keyset ID is a lowercase hex string.
+/// Each keyset is identified by its keyset id. The keyset ID
+/// is a lowercase hex string.
 /// It can be computed by anyone from its public keys:
 ///
 /// 1-Sort public keys by their amount in ascending order
@@ -88,23 +89,30 @@ pub enum Unit {
 /// ```
 ///
 /// A mint responds only with its active keysets
-/// Active keysets are the ones that the mint can sign promises with it
+/// Active keysets are the ones that the mint can sign promises
+/// with it
 ///
-/// The mint will accept tokens from inactive keysets as inputs (proofs)
-/// but will not sign with them for new outputs (blinded messages)
+/// The mint will accept tokens from inactive keysets as inputs
+/// (proofs) but will not sign with them for new outputs
+/// (blinded messages)
 ///
-/// The active keysets can change over time, for example due to a key rotation.
-/// a List of all keysets (active and inactive) can be requested separately (see nut02)
+/// The active keysets can change over time, for example due to a
+/// key rotation.
+/// A List of all keysets (active and inactive) can be requested
+/// separately (see nut02)
 ///
-/// A mint can support multiple keysets at the same time, but will only respond with
-/// active keysets on the endpoints GET /v1/keys
+/// A mint can support multiple keysets at the same time,
+/// but will only respond with active keysets on the
+/// endpoints GET /v1/keys
 ///
-/// A wallet can ask for the keys of a specific keyset (active or inactive) requesting via
+/// A wallet can ask for the keys of a specific keyset
+/// (active or inactive) requesting via
 /// the endpoint GET /v1/keys/{keyset_id} (nut02).
 ///
 /// Keyset generation
 ///
-/// The mint is free to use whichever key generation method they like.
+/// The mint is free to use whichever key generation method
+/// they like.
 /// Mints MUST generate a keyset for each unit they support
 ///
 ///

@@ -8,8 +8,7 @@ use bitcoin::{
 };
 
 use crate::{
-  helpers::{generate_key_pair, hash_to_curve},
-  types::{BlindSignature, BlindedMessage},
+  helpers::{generate_key_pair, hash_to_curve}, rest::{GetKeysResponse, GetKeysetsResponse}, types::{BlindSignature, BlindedMessage}
 };
 
 /// [`Mint`] error
@@ -37,6 +36,38 @@ impl Mint {
       secretkey: keypair.0,
       pubkey: keypair.1,
     }
+  }
+
+  /// A set of all Ks for a set of amounts is called a keyset.
+  /// 
+  /// A mint responds only with its active keysets
+  /// Active keysets are the ones that the mint can sign promises
+  /// (blind signatures) with it.
+  ///
+  /// The mint will accept tokens from inactive keysets as inputs
+  /// (proofs) but will not sign with them for new outputs
+  /// (blinded messages).
+  pub fn get_v1_keys(&self) -> GetKeysResponse {
+    // TODO: return active keys
+    unimplemented!()
+  }
+
+  pub fn get_v1_keys_keyset_id(&self, _keyset_id: String) -> GetKeysResponse {
+    // TODO: return keyset that matches the keyset_id
+    unimplemented!()
+  }
+
+  pub fn get_v1_keysets(&self) -> GetKeysetsResponse {
+    // TODO: return keysets
+    unimplemented!()
+  }
+
+  /// Each keyset is identified by its keyset id
+  /// which can be computed by anyone from its public keys
+  /// using `[derive_keyset_id]` keyset fn.
+  fn generate_keyset(&self) {
+    // TODO
+    unimplemented!()
   }
 
   // Signs blinded message (an output)
