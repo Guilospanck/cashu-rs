@@ -61,7 +61,7 @@ pub struct BlindSignature {
 pub type Keys = BTreeMap<Amount, PublicKey>;
 
 #[allow(clippy::upper_case_acronyms)]
-#[derive(Debug, PartialEq, strum::Display)]
+#[derive(Debug, PartialEq, strum::Display, Serialize, Deserialize, Clone)]
 pub enum Unit {
   BTC,
   SAT,

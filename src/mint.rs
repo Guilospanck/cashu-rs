@@ -8,7 +8,10 @@ use bitcoin::{
 };
 
 use crate::{
-  helpers::{generate_key_pair, hash_to_curve}, rest::{GetKeysResponse, GetKeysetsResponse}, types::{BlindSignature, BlindedMessage}
+  helpers::{generate_key_pair, hash_to_curve},
+  keyset::{generate_keyset, KeysetWithKeys},
+  rest::{GetKeysResponse, GetKeysetsResponse},
+  types::{BlindSignature, BlindedMessage},
 };
 
 /// [`Mint`] error
@@ -25,6 +28,7 @@ pub struct Mint {
   secretkey: SecretKey,
   #[serde(rename = "K")]
   pub pubkey: PublicKey,
+  keysets: Vec<KeysetWithKeys>,
 }
 
 impl Mint {
@@ -32,14 +36,17 @@ impl Mint {
   pub fn new() -> Self {
     let keypair = generate_key_pair();
 
+    let keyset = generate_keyset();
+
     Self {
       secretkey: keypair.0,
       pubkey: keypair.1,
+      keysets: [keyset].to_vec(),
     }
   }
 
   /// A set of all Ks for a set of amounts is called a keyset.
-  /// 
+  ///
   /// A mint responds only with its active keysets
   /// Active keysets are the ones that the mint can sign promises
   /// (blind signatures) with it.
@@ -48,8 +55,12 @@ impl Mint {
   /// (proofs) but will not sign with them for new outputs
   /// (blinded messages).
   pub fn get_v1_keys(&self) -> GetKeysResponse {
-    // TODO: return active keys
-    unimplemented!()
+    let active_keysets: Vec<KeysetWithKeys> =
+      self.keysets.clone().into_iter().filter(|x| x.active).collect();
+
+    GetKeysResponse {
+      keysets: active_keysets,
+    }
   }
 
   pub fn get_v1_keys_keyset_id(&self, _keyset_id: String) -> GetKeysResponse {
@@ -59,14 +70,6 @@ impl Mint {
 
   pub fn get_v1_keysets(&self) -> GetKeysetsResponse {
     // TODO: return keysets
-    unimplemented!()
-  }
-
-  /// Each keyset is identified by its keyset id
-  /// which can be computed by anyone from its public keys
-  /// using `[derive_keyset_id]` keyset fn.
-  fn generate_keyset(&self) {
-    // TODO
     unimplemented!()
   }
 

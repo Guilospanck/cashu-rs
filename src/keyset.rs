@@ -1,6 +1,8 @@
+use serde::{Deserialize, Serialize};
+
 use crate::{
   constants::KEYSET_ID_VERSION,
-  helpers::sha256_hasher,
+  helpers::{generate_key_pair, sha256_hasher},
   types::{Keys, Unit},
 };
 
@@ -10,9 +12,11 @@ pub struct Keyset {
   pub active: bool,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct KeysetWithKeys {
   pub id: String,
   pub unit: Unit,
+  pub active: bool,
   pub keys: Keys,
 }
 
@@ -20,7 +24,12 @@ impl KeysetWithKeys {
   pub fn new(unit: Unit, keys: &Keys) -> Self {
     let id = derive_keyset_id(keys.clone());
 
-    Self { id, unit, keys: keys.clone() }
+    Self {
+      id,
+      unit,
+      active: true,
+      keys: keys.clone(),
+    }
   }
 }
 
@@ -44,21 +53,55 @@ pub fn derive_keyset_id(keys: Keys) -> String {
   format!("{}{}", KEYSET_ID_VERSION, &hex_encoded[..14])
 }
 
+/// Each keyset is identified by its keyset id
+/// which can be computed by anyone from its public keys
+/// using `[derive_keyset_id]` keyset fn.
+pub fn generate_keyset() -> KeysetWithKeys {
+  let (_, k1) = generate_key_pair();
+  let (_, k2) = generate_key_pair();
+  let (_, k3) = generate_key_pair();
+
+  let mut keys = Keys::new();
+  keys.insert(1, k1);
+  keys.insert(2, k2);
+  keys.insert(4, k3);
+
+  let id = derive_keyset_id(keys.clone());
+
+  KeysetWithKeys {
+    id,
+    unit: Unit::SAT,
+    active: true,
+    keys: keys.clone(),
+  }
+}
+
 #[cfg(test)]
 mod tests {
 
-  use std::str::FromStr;
-  use bitcoin::secp256k1::PublicKey;
   use super::*;
+  use bitcoin::secp256k1::PublicKey;
+  use std::str::FromStr;
 
   #[test]
   fn should_derive_keyset_id_correctly() {
     // arrange
-    let k1 = PublicKey::from_str("03bffbb7550d4464afa24fb0d6ae9a4ab437e93aa710f103170a4504bfb9ba8f0e").unwrap();
-    let k2 = PublicKey::from_str("03f7a3beef79667abd4f0e1cc59a7a73528db8adb9017d2a040d35fd0bc324ac1e").unwrap();
-    let k3 = PublicKey::from_str("03bff4d95569a355dea0663a4bf97e2e6a3ebbf243b40c985252172fd5c2e707ea").unwrap();
+    let k1 =
+      PublicKey::from_str("03bffbb7550d4464afa24fb0d6ae9a4ab437e93aa710f103170a4504bfb9ba8f0e")
+        .unwrap();
+    let k2 =
+      PublicKey::from_str("03f7a3beef79667abd4f0e1cc59a7a73528db8adb9017d2a040d35fd0bc324ac1e")
+        .unwrap();
+    let k3 =
+      PublicKey::from_str("03bff4d95569a355dea0663a4bf97e2e6a3ebbf243b40c985252172fd5c2e707ea")
+        .unwrap();
 
-    let pubkeys_concatenated = [k1.serialize().to_vec(), k2.serialize().to_vec(), k3.serialize().to_vec()].concat();
+    let pubkeys_concatenated = [
+      k1.serialize().to_vec(),
+      k2.serialize().to_vec(),
+      k3.serialize().to_vec(),
+    ]
+    .concat();
     let pubkeys_hashed = sha256_hasher(pubkeys_concatenated);
     let hex_encoded = hex::encode(pubkeys_hashed);
 
