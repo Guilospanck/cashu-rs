@@ -9,7 +9,7 @@ use bitcoin::{
 
 use crate::{
   helpers::{generate_key_pair, hash_to_curve},
-  keyset::{generate_keyset, KeysetWithKeys},
+  keyset::{generate_keyset, Keyset, KeysetWithKeys, Keysets},
   rest::{GetKeysResponse, GetKeysetsResponse},
   types::{BlindSignature, BlindedMessage},
 };
@@ -54,23 +54,44 @@ impl Mint {
   /// The mint will accept tokens from inactive keysets as inputs
   /// (proofs) but will not sign with them for new outputs
   /// (blinded messages).
+  ///
+  /// /v1/keys
   pub fn get_v1_keys(&self) -> GetKeysResponse {
-    let active_keysets: Vec<KeysetWithKeys> =
-      self.keysets.clone().into_iter().filter(|x| x.active).collect();
+    let active_keysets: Vec<KeysetWithKeys> = self
+      .keysets
+      .clone()
+      .into_iter()
+      .filter(|x| x.active)
+      .collect();
 
     GetKeysResponse {
       keysets: active_keysets,
     }
   }
 
-  pub fn get_v1_keys_keyset_id(&self, _keyset_id: String) -> GetKeysResponse {
-    // TODO: return keyset that matches the keyset_id
-    unimplemented!()
+  /// /v1/keys/{keyset_id}
+  pub fn get_v1_keys_keyset_id(&self, keyset_id: String) -> GetKeysResponse {
+    let mut keysets_with_keys: Vec<KeysetWithKeys> = vec![];
+
+    if let Some(keyset) = self
+       .keysets
+       .clone()
+       .into_iter()
+       .find(|KeysetWithKeys { id, .. }| *id == keyset_id) { keysets_with_keys.push(keyset) };
+
+    GetKeysResponse { keysets: keysets_with_keys }
   }
 
+  /// /v1/keysets
   pub fn get_v1_keysets(&self) -> GetKeysetsResponse {
-    // TODO: return keysets
-    unimplemented!()
+    let mut keysets: Keysets = vec![];
+    self.keysets.clone().into_iter().for_each(
+      |KeysetWithKeys {
+         id, unit, active, ..
+       }| keysets.push(Keyset { id, unit, active }),
+    );
+
+    GetKeysetsResponse { keysets }
   }
 
   // Signs blinded message (an output)

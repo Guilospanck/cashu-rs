@@ -7,6 +7,8 @@ Work in progress.
 ## NUTs implemented
 
 - [x] [NUT-00](https://github.com/cashubtc/nuts/blob/main/00.md)
+- [x] [NUT-01](https://github.com/cashubtc/nuts/blob/main/01.md)
+- [x] [NUT-02](https://github.com/cashubtc/nuts/blob/main/02.md)
 
 ## TODO
 

@@ -33,11 +33,20 @@ type Result<T> = result::Result<T, WalletError>;
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Wallet {}
 
+// TODO: Wallets can request the list of keyset IDs from the mint upon startup
+// TODO  and load only tokens from its database that have a keyset ID supported
+// TODO  by the mint it interacts with. This also helps wallets to determine
+// TODO  whether the mint has rotated to a new current keyset (i.e. added new
+// TODO  active keysets and inactivated old ones) and whether the wallet should
+// TODO  recycle all tokens from inactive keysets to currently active ones.
 impl Wallet {
   pub fn new() -> Self {
     Self {}
   }
 
+  // TODO: Wallets SHOULD store keysets the first time they encounter them along with the URL of the mint they are from.
+  // TODO: Wallets SHOULD spend Proofs of inactive keysets first
+  // TODO: When constructing outputs for an operation, wallets MUST choose only active keysets
   pub fn begin(&self) -> Result<()> {
     // Mint Bob publishes public key K = kG
     let mint = Mint::new();
@@ -101,6 +110,7 @@ impl Wallet {
     Ok(BlindedMessage {
       amount: 10,
       b: b_,
+      // TODO: change this to the keyset ID
       id: hex::encode(x),
     })
   }

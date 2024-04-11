@@ -6,11 +6,14 @@ use crate::{
   types::{Keys, Unit},
 };
 
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Keyset {
   pub id: String,
   pub unit: Unit,
   pub active: bool,
 }
+
+pub type Keysets = Vec<Keyset>;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct KeysetWithKeys {
