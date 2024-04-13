@@ -7,6 +7,6 @@ mod mint;
 mod wallet;
 mod keyset;
 mod rest;
-
+mod database;
 
 

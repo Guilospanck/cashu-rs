@@ -1,7 +1,8 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, str::FromStr};
 
 use bitcoin::secp256k1::PublicKey;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
+use strum::EnumString;
 
 pub type Amount = u64;
 
@@ -63,8 +64,19 @@ pub type BlindSignatures = Vec<BlindSignature>;
 pub type Keys = BTreeMap<Amount, PublicKey>;
 
 #[allow(clippy::upper_case_acronyms)]
-#[derive(Debug, PartialEq, strum::Display, Serialize, Deserialize, Clone)]
+#[derive(Debug, PartialEq, Serialize, Clone, EnumString)]
+#[strum(serialize_all = "lowercase")]
 pub enum Unit {
   BTC,
   SAT,
+}
+
+impl<'de> Deserialize<'de> for Unit {
+  fn deserialize<D>(deserializer: D) -> Result<Unit, D::Error>
+  where
+      D: Deserializer<'de>,
+  {
+      let s: String = Deserialize::deserialize(deserializer)?;
+      Unit::from_str(&s.to_lowercase()).map_err(serde::de::Error::custom)
+  }
 }
