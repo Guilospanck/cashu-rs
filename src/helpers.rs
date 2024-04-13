@@ -40,3 +40,16 @@ fn _get_hashed_value(msg: Vec<u8>, counter: u32) -> Vec<u8> {
 
   sha256_hasher(msg_to_hash)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::generate_key_pair;
+
+  #[test]
+  fn keypair_generation() {
+    let (secretkey, pubkey) = generate_key_pair();
+
+    let _pubkey_serialized = hex::encode(pubkey.serialize());
+    let _seckey_serialized = secretkey.display_secret().to_string();
+  }
+}
