@@ -63,7 +63,7 @@ pub type BlindSignatures = Vec<BlindSignature>;
 
 pub type Keys = BTreeMap<Amount, PublicKey>;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Keypair {
   pub pubkey: PublicKey,
   pub secretkey: SecretKey

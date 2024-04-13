@@ -8,7 +8,11 @@ use bitcoin::{
 };
 
 use crate::{
-  database::MintDB, helpers::{generate_key_pair, hash_to_curve}, keyset::{generate_keyset, Keyset, KeysetWithKeys, Keysets}, rest::{GetKeysResponse, GetKeysetsResponse}, types::{BlindSignature, BlindSignatures, BlindedMessage, BlindedMessages, Proofs}
+  database::MintDB,
+  helpers::{generate_key_pair, hash_to_curve},
+  keyset::{generate_keyset_and_keypairs, Keyset, KeysetWithKeys, Keysets},
+  rest::{GetKeysResponse, GetKeysetsResponse},
+  types::{BlindSignature, BlindSignatures, BlindedMessage, BlindedMessages, Keypairs, Proofs},
 };
 
 /// [`Mint`] error
@@ -23,9 +27,9 @@ type Result<T> = result::Result<T, MintError>;
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Mint {
   secretkey: SecretKey,
-  #[serde(rename = "K")]
-  pub pubkey: PublicKey,
+  pubkey: PublicKey,
   keysets: Vec<KeysetWithKeys>,
+  keypairs: Keypairs
 }
 
 impl Mint {
@@ -35,18 +39,26 @@ impl Mint {
 
     let mut db = MintDB::new().unwrap();
     let mut keysets = db.get_all_keysets().unwrap();
+    let mut keypairs = db.get_all_keypairs().unwrap();
 
-    if keysets.is_empty() {
-      let generated_keyset = generate_keyset();
-      db.write_to_keysets_table(&generated_keyset.id, generated_keyset.clone()).unwrap();
+    if keysets.is_empty() || keypairs.is_empty() {
+      let (generated_keyset, generated_keypairs) = generate_keyset_and_keypairs();
+      db.write_to_keysets_table(&generated_keyset.id, generated_keyset.clone())
+        .unwrap();
+
+      for keypair in generated_keypairs.clone() {
+        db.write_to_keypairs_table(keypair.pubkey, keypair.secretkey).unwrap();
+      }
+      
       keysets.push(generated_keyset);
+      keypairs = generated_keypairs;
     }
-
 
     Self {
       secretkey: keypair.0,
       pubkey: keypair.1,
       keysets,
+      keypairs
     }
   }
 
@@ -79,12 +91,17 @@ impl Mint {
     let mut keysets_with_keys: Vec<KeysetWithKeys> = vec![];
 
     if let Some(keyset) = self
-       .keysets
-       .clone()
-       .into_iter()
-       .find(|KeysetWithKeys { id, .. }| *id == keyset_id) { keysets_with_keys.push(keyset) };
+      .keysets
+      .clone()
+      .into_iter()
+      .find(|KeysetWithKeys { id, .. }| *id == keyset_id)
+    {
+      keysets_with_keys.push(keyset)
+    };
 
-    GetKeysResponse { keysets: keysets_with_keys }
+    GetKeysResponse {
+      keysets: keysets_with_keys,
+    }
   }
 
   /// /v1/keysets
