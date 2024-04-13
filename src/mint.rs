@@ -8,10 +8,7 @@ use bitcoin::{
 };
 
 use crate::{
-  helpers::{generate_key_pair, hash_to_curve},
-  keyset::{generate_keyset, Keyset, KeysetWithKeys, Keysets},
-  rest::{GetKeysResponse, GetKeysetsResponse},
-  types::{BlindSignature, BlindSignatures, BlindedMessage, BlindedMessages, Proofs},
+  database::MintDB, helpers::{generate_key_pair, hash_to_curve}, keyset::{generate_keyset, Keyset, KeysetWithKeys, Keysets}, rest::{GetKeysResponse, GetKeysetsResponse}, types::{BlindSignature, BlindSignatures, BlindedMessage, BlindedMessages, Proofs}
 };
 
 /// [`Mint`] error
@@ -36,12 +33,20 @@ impl Mint {
   pub fn new() -> Self {
     let keypair = generate_key_pair();
 
-    let keyset = generate_keyset();
+    let mut db = MintDB::new().unwrap();
+    let mut keysets = db.get_all_keysets().unwrap();
+
+    if keysets.is_empty() {
+      let generated_keyset = generate_keyset();
+      db.write_to_keysets_table(&generated_keyset.id, generated_keyset.clone()).unwrap();
+      keysets.push(generated_keyset);
+    }
+
 
     Self {
       secretkey: keypair.0,
       pubkey: keypair.1,
-      keysets: [keyset].to_vec(),
+      keysets,
     }
   }
 
