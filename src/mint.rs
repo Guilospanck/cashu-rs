@@ -11,7 +11,7 @@ use crate::{
   helpers::{generate_key_pair, hash_to_curve},
   keyset::{generate_keyset, Keyset, KeysetWithKeys, Keysets},
   rest::{GetKeysResponse, GetKeysetsResponse},
-  types::{BlindSignature, BlindedMessage},
+  types::{BlindSignature, BlindSignatures, BlindedMessage, BlindedMessages, Proofs},
 };
 
 /// [`Mint`] error
@@ -92,6 +92,10 @@ impl Mint {
     );
 
     GetKeysetsResponse { keysets }
+  }
+
+  pub fn swap_tokens(&self, _inputs: Proofs, _outputs: BlindedMessages) -> Result<BlindSignatures> {
+    unimplemented!()
   }
 
   // Signs blinded message (an output)

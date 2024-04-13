@@ -58,6 +58,8 @@ pub struct BlindSignature {
   pub c: PublicKey,
 }
 
+pub type BlindSignatures = Vec<BlindSignature>;
+
 pub type Keys = BTreeMap<Amount, PublicKey>;
 
 #[allow(clippy::upper_case_acronyms)]

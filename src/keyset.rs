@@ -63,11 +63,27 @@ pub fn generate_keyset() -> KeysetWithKeys {
   let (_, k1) = generate_key_pair();
   let (_, k2) = generate_key_pair();
   let (_, k3) = generate_key_pair();
+  let (_, k4) = generate_key_pair();
+  let (_, k5) = generate_key_pair();
+  let (_, k6) = generate_key_pair();
+  let (_, k7) = generate_key_pair();
+  let (_, k8) = generate_key_pair();
+  let (_, k9) = generate_key_pair();
+  let (_, k10) = generate_key_pair();
+  let (_, k11) = generate_key_pair();
 
   let mut keys = Keys::new();
   keys.insert(1, k1);
   keys.insert(2, k2);
   keys.insert(4, k3);
+  keys.insert(8, k4);
+  keys.insert(16, k5);
+  keys.insert(32, k6);
+  keys.insert(64, k7);
+  keys.insert(128, k8);
+  keys.insert(256, k9);
+  keys.insert(512, k10);
+  keys.insert(1024, k11);
 
   let id = derive_keyset_id(keys.clone());
 
