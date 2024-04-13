@@ -26,8 +26,6 @@ type Result<T> = result::Result<T, MintError>;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Mint {
-  secretkey: SecretKey,
-  pubkey: PublicKey,
   keysets: Vec<KeysetWithKeys>,
   keypairs: Keypairs
 }
@@ -35,8 +33,6 @@ pub struct Mint {
 impl Mint {
   // Publishes its public key `K`.
   pub fn new() -> Self {
-    let keypair = generate_key_pair();
-
     let mut db = MintDB::new().unwrap();
     let mut keysets = db.get_all_keysets().unwrap();
     let mut keypairs = db.get_all_keypairs().unwrap();
@@ -55,8 +51,6 @@ impl Mint {
     }
 
     Self {
-      secretkey: keypair.0,
-      pubkey: keypair.1,
       keysets,
       keypairs
     }
