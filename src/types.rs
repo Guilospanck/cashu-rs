@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, str::FromStr};
 
-use bitcoin::secp256k1::PublicKey;
+use bitcoin::secp256k1::{PublicKey, SecretKey};
 use serde::{Deserialize, Deserializer, Serialize};
 use strum::EnumString;
 
@@ -62,6 +62,14 @@ pub struct BlindSignature {
 pub type BlindSignatures = Vec<BlindSignature>;
 
 pub type Keys = BTreeMap<Amount, PublicKey>;
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Keypair {
+  pub pubkey: PublicKey,
+  pub secretkey: SecretKey
+}
+
+pub type Keypairs = Vec<Keypair>;
 
 #[allow(clippy::upper_case_acronyms)]
 #[derive(Debug, PartialEq, Serialize, Clone, EnumString)]
