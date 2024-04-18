@@ -3,9 +3,13 @@ use std::result;
 use serde::{Deserialize, Serialize};
 
 use crate::{
+  database::{CashuDatabase, DBType},
   helpers::{generate_key_pair, hash_to_curve},
   mint::Mint,
-  types::{BlindSignature, BlindedMessage},
+  types::{
+    Amount, BlindSignature, BlindSignatures, BlindedMessage, BlindedMessages, Proof, Proofs, Token,
+    Tokens, Unit,
+  },
 };
 
 use bitcoin::{
@@ -31,7 +35,10 @@ pub enum WalletError {
 type Result<T> = result::Result<T, WalletError>;
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct Wallet {}
+pub struct Wallet {
+  tokens: Tokens,
+  url: String,
+}
 
 // TODO: Wallets can request the list of keyset IDs from the mint upon startup
 // TODO  and load only tokens from its database that have a keyset ID supported
@@ -41,55 +48,108 @@ pub struct Wallet {}
 // TODO  recycle all tokens from inactive keysets to currently active ones.
 impl Wallet {
   pub fn new() -> Self {
-    Self {}
+    let wallet_db = CashuDatabase::new(DBType::WALLET).unwrap();
+    let tokens = wallet_db.get_all_tokens().unwrap();
+    let url = "http://my_mint_url.cashu".to_string();
+    Self { tokens, url }
   }
 
   // TODO: Wallets SHOULD store keysets the first time they encounter them along with the URL of the mint they are from.
   // TODO: Wallets SHOULD spend Proofs of inactive keysets first
   // TODO: When constructing outputs for an operation, wallets MUST choose only active keysets
-  pub fn begin(&self) -> Result<()> {
+  pub fn swap_tokens(&self) -> Result<()> {
     // Mint Bob publishes public key K = kG
     let mint = Mint::new();
 
-    // Picks secret x (utf-8 encoded 32 bytes encoded string) -- coin ID
-    let (x, _) = generate_key_pair();
-    let x = x.secret_bytes();
+    // Get all keysets
+    let mint_keysets = mint.get_v1_keys();
+    let sat_keyset = mint_keysets
+    .keysets
+    .iter()
+    .find(|keyset| keyset.unit == Unit::SAT).unwrap();
+    let mint_sat_keys = &sat_keyset.keys;
+
+    // Get all tokens (in wallet database) from this mint
+    let tokens_from_mint = self
+      .tokens
+      .iter()
+      .find(|Token { mint, .. }| *mint == self.url);
+
+    // Get all proofs from this mint
+    let mut proofs = vec![];
+    if let Some(token) = tokens_from_mint {
+      proofs = token.proofs.clone();
+    }
+
+    // TODO: this used in minting tokens
+    // // Picks secret x (utf-8 encoded 32 bytes encoded string) -- coin ID
+    // let (x, _) = generate_key_pair();
+    // let x = x.secret_bytes();
 
     // Get r, the blinding factor. r \in [0, (p-1)/2) <- part of the curve
     let (blinding_factor, _) = generate_key_pair();
 
-    // Computes `B_ = Y + rG`, with r being a random blinding factor (blinding)
-    let blinded_message = match self.blind(x.to_vec(), blinding_factor) {
-      Ok(value) => value,
-      Err(e) => return Err(WalletError::BlindError(e.to_string())),
-    };
+    let mut outputs: BlindedMessages = vec![];
+    // TODO: select which proofs we want
+    for proof in &proofs {
+      let x_vec = hex::decode(proof.secret.clone()).unwrap();
+      // Computes `B_ = Y + rG`, with r being a random blinding factor (blinding)
+      // TODO: here it looks like we can change the amount, so we request different pocket change tokens from mint
+      let blinded_message = match self.blind(x_vec, blinding_factor, proof.amount, proof.id.clone()) {
+        Ok(value) => value,
+        Err(e) => return Err(WalletError::BlindError(e.to_string())),
+      };
 
-    // Alice sends blinded message to Bob
-    let blind_signature: BlindSignature = match mint.mint_or_swap_tokens(blinded_message) {
+      outputs.push(blinded_message);
+    }
+
+    // Swaps inputs for blind_signatures
+    let blind_signatures: BlindSignatures = match mint.swap_tokens(proofs.clone(), outputs) {
       Ok(value) => value,
       Err(e) => return Err(WalletError::CouldNotMintToken(e.to_string())),
     };
 
-    // Unblinds signature
-    let c = match self.unblind(&mint, blind_signature, blinding_factor) {
-      Ok(value) => value,
-      Err(e) => return Err(WalletError::UnblindError(e.to_string())),
-    };
+    let mut new_proofs: Proofs = vec![];
+    for (idx, blind_signature) in blind_signatures.iter().enumerate() {
+      // get mint pubkey for this amount
+      let pubkey = mint_sat_keys.get(&blind_signature.amount).unwrap();
 
-    // Alice can take the pair (x, C) as a token and can send it to Carol.
-    let token = (x, c);
+      // Unblinds signature
+      let c = match self.unblind(*pubkey, blind_signature.clone(), blinding_factor) {
+        Ok(value) => value,
+        Err(e) => return Err(WalletError::UnblindError(e.to_string())),
+      };
 
-    // verification
-    let is_verified = match mint.verification(token.0.to_vec(), token.1) {
-      Ok(value) => value,
-      Err(e) => return Err(WalletError::CouldNotVerifyToken(e.to_string())),
-    };
+      let proof = Proof {
+        c,
+        amount: blind_signature.amount,
+        id: blind_signature.id.clone(),
+        secret: proofs.clone()[idx].secret.clone(), // TODO: not sure
+      };
 
-    println!("{}", is_verified);
+      new_proofs.push(proof)
+    }
+
+    // // Alice can take the pair (x, C) as a token and can send it to Carol.
+    // let token = (x, c);
+
+    // // verification
+    // let is_verified = match mint.verification(token.0.to_vec(), token.1) {
+    //   Ok(value) => value,
+    //   Err(e) => return Err(WalletError::CouldNotVerifyToken(e.to_string())),
+    // };
+
+    // println!("{}", is_verified);
     Ok(())
   }
 
-  pub fn blind(&self, x: Vec<u8>, blinding_factor: SecretKey) -> Result<BlindedMessage> {
+  pub fn blind(
+    &self,
+    x: Vec<u8>,
+    blinding_factor: SecretKey,
+    amount: Amount,
+    keyset_id: String,
+  ) -> Result<BlindedMessage> {
     // Computes Y = hash_to_curve(x)
     let y = hash_to_curve(x.to_vec());
 
@@ -108,16 +168,15 @@ impl Wallet {
     };
 
     Ok(BlindedMessage {
-      amount: 10,
+      amount,
       b: b_,
-      // TODO: change this to the keyset ID
-      id: hex::encode(x),
+      id: keyset_id,
     })
   }
 
   pub fn unblind(
     &self,
-    mint: &Mint,
+    pubkey: PublicKey,
     blind_signature: BlindSignature,
     blinding_factor: SecretKey,
   ) -> Result<PublicKey> {
@@ -126,7 +185,7 @@ impl Wallet {
     // calculate scalar of blinding_factor
     let blinding_factor_scalar = Scalar::from(blinding_factor);
     // calculate rK
-    let rk = match mint.pubkey.mul_tweak(&secp, &blinding_factor_scalar) {
+    let rk = match pubkey.mul_tweak(&secp, &blinding_factor_scalar) {
       Ok(value) => value,
       Err(e) => {
         return Err(WalletError::InvalidECMath(format!(

@@ -4,12 +4,12 @@ use serde::{Deserialize, Serialize};
 
 use bitcoin::{
   key::Secp256k1,
-  secp256k1::{PublicKey, Scalar, SecretKey},
+  secp256k1::{PublicKey, Scalar},
 };
 
 use crate::{
-  database::MintDB,
-  helpers::{generate_key_pair, hash_to_curve},
+  database::{CashuDatabase, DBType},
+  helpers::hash_to_curve,
   keyset::{generate_keyset_and_keypairs, Keyset, KeysetWithKeys, Keysets},
   rest::{GetKeysResponse, GetKeysetsResponse},
   types::{BlindSignature, BlindSignatures, BlindedMessage, BlindedMessages, Keypairs, Proofs},
@@ -27,13 +27,12 @@ type Result<T> = result::Result<T, MintError>;
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Mint {
   keysets: Vec<KeysetWithKeys>,
-  keypairs: Keypairs
+  keypairs: Keypairs,
 }
 
 impl Mint {
-  // Publishes its public key `K`.
   pub fn new() -> Self {
-    let mut db = MintDB::new().unwrap();
+    let mut db = CashuDatabase::new(DBType::MINT).unwrap();
     let mut keysets = db.get_all_keysets().unwrap();
     let mut keypairs = db.get_all_keypairs().unwrap();
 
@@ -43,17 +42,15 @@ impl Mint {
         .unwrap();
 
       for keypair in generated_keypairs.clone() {
-        db.write_to_keypairs_table(keypair.pubkey, keypair.secretkey).unwrap();
+        db.write_to_keypairs_table(keypair.pubkey, keypair.secretkey)
+          .unwrap();
       }
-      
+
       keysets.push(generated_keyset);
       keypairs = generated_keypairs;
     }
 
-    Self {
-      keysets,
-      keypairs
-    }
+    Self { keysets, keypairs }
   }
 
   /// A set of all Ks for a set of amounts is called a keyset.
@@ -118,8 +115,16 @@ impl Mint {
   pub fn mint_or_swap_tokens(&self, message: BlindedMessage) -> Result<BlindSignature> {
     let BlindedMessage { b, id, amount } = message;
 
+    // TODO: not sure about this
+    let secretkey = self
+      .keypairs
+      .iter()
+      .find(|keypair| keypair.pubkey == b)
+      .unwrap()
+      .secretkey;
+
     let secp = Secp256k1::new();
-    let scalar = Scalar::from(self.secretkey);
+    let scalar = Scalar::from(secretkey);
     // calculate C_ = kB_
     let c_ = match b.mul_tweak(&secp, &scalar) {
       Ok(c) => c,
@@ -132,9 +137,17 @@ impl Mint {
 
   // checks that k*hash_to_curve(x) == C
   pub fn verification(&self, x: Vec<u8>, c: PublicKey) -> Result<bool> {
+    // TODO: not sure about this
+    let secretkey = self
+      .keypairs
+      .iter()
+      .find(|keypair| keypair.pubkey == c)
+      .unwrap()
+      .secretkey;
+
     let y = hash_to_curve(x);
     let secp = Secp256k1::new();
-    let scalar = Scalar::from(self.secretkey);
+    let scalar = Scalar::from(secretkey);
     // calculate kY
     let ky = match y.mul_tweak(&secp, &scalar) {
       Ok(value) => value,

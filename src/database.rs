@@ -1,19 +1,13 @@
 use bitcoin::secp256k1::{Error as Secp256k1Error, PublicKey, SecretKey};
 use redb::{Database, ReadableTable, TableDefinition, WriteTransaction};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::{fs, result, str::FromStr};
+use strum::{EnumString, IntoStaticStr};
 
 use crate::{
   keyset::KeysetWithKeys,
-  types::{Keypair, Keypairs},
+  types::{Keypair, Keypairs, Proofs, Token, Tokens},
 };
-
-#[allow(clippy::upper_case_acronyms)]
-#[derive(Debug, PartialEq, strum::Display, Serialize, Deserialize, Clone)]
-pub enum MintDBTables {
-  #[strum(serialize = "keysets")]
-  KEYSETS,
-}
 
 /// [`Database`] error
 #[derive(thiserror::Error, Debug)]
@@ -55,37 +49,47 @@ pub enum CashuDatabaseError {
   SECP256K1(#[from] Secp256k1Error),
 }
 
-// keyset_id, KeysetWithKeys
-const KEYSETS_TABLE: TableDefinition<&str, &str> = TableDefinition::new("keysets");
+#[allow(clippy::upper_case_acronyms)]
+#[derive(Debug, PartialEq, Serialize, Clone, EnumString, IntoStaticStr)]
+#[strum(serialize_all = "lowercase")]
+pub enum DBType {
+  MINT,
+  WALLET,
+}
 
-// pubkey, seckey
-const KEYPAIRS_TABLE: TableDefinition<&str, &str> = TableDefinition::new("keypairs");
+impl<'de> Deserialize<'de> for DBType {
+  fn deserialize<D>(deserializer: D) -> result::Result<DBType, D::Error>
+  where
+    D: Deserializer<'de>,
+  {
+    let s: String = Deserialize::deserialize(deserializer)?;
+    DBType::from_str(&s.to_lowercase()).map_err(serde::de::Error::custom)
+  }
+}
 
 type Result<T> = result::Result<T, CashuDatabaseError>;
 
-pub struct MintDB {
+pub struct CashuDatabase {
   db: Database,
 }
 
-impl MintDB {
-  pub fn new() -> Result<Self> {
-    MintDB::initialise_db("mint")
+impl CashuDatabase {
+  // keyset_id, KeysetWithKeys
+  const KEYSETS_TABLE: TableDefinition<'static, &'static str, &'static str> =
+    TableDefinition::new("keysets");
+  // pubkey, seckey
+  const KEYPAIRS_TABLE: TableDefinition<'static, &'static str, &'static str> =
+    TableDefinition::new("keypairs");
+  // mint_url, proofs
+  const PROOFS_TABLE: TableDefinition<'static, &'static str, &'static str> =
+    TableDefinition::new("proofs");
+
+  pub fn new(db_type: DBType) -> Result<Self> {
+    CashuDatabase::initialise_db(db_type)
   }
 
-  fn new_testing_db(db_name: &str) -> Result<Self> {
-    MintDB::initialise_db(db_name)
-  }
-
-  fn initialise_db(db_name: &str) -> Result<Self> {
-    fs::create_dir_all("db/")?;
-    let db = Database::create(format!("db/{}.redb", db_name))?;
-
-    let write_txn = db.begin_write()?;
-    write_txn.open_table(KEYSETS_TABLE)?; // this basically just creates the table if doesn't exist
-    write_txn.open_table(KEYPAIRS_TABLE)?; // this basically just creates the table if doesn't exist
-    write_txn.commit()?;
-
-    Ok(Self { db })
+  pub fn new_testing_db(db_name: &str) -> Result<Self> {
+    CashuDatabase::initialise_test_db(db_name)
   }
 
   pub fn write_to_keypairs_table(&mut self, k: PublicKey, v: SecretKey) -> Result<()> {
@@ -93,7 +97,7 @@ impl MintDB {
     let seckey_serialized = v.display_secret().to_string();
     let write_txn = self.begin_write()?;
     {
-      let mut table = write_txn.open_table(KEYPAIRS_TABLE)?;
+      let mut table = write_txn.open_table(Self::KEYPAIRS_TABLE)?;
       table.insert(pubkey_serialized.as_str(), seckey_serialized.as_str())?;
     }
     self.commit_txn(write_txn)?;
@@ -103,7 +107,7 @@ impl MintDB {
   pub fn get_all_keypairs(&self) -> Result<Keypairs> {
     let mut keypairs: Keypairs = vec![];
     let read_txn = self.db.begin_read()?;
-    let table = read_txn.open_table(KEYPAIRS_TABLE)?;
+    let table = read_txn.open_table(Self::KEYPAIRS_TABLE)?;
 
     table.iter().unwrap().for_each(|keypair| {
       let evt = keypair.unwrap();
@@ -125,7 +129,7 @@ impl MintDB {
     let value_serialized = serde_json::to_string(&v)?;
     let write_txn = self.begin_write()?;
     {
-      let mut table = write_txn.open_table(KEYSETS_TABLE)?;
+      let mut table = write_txn.open_table(Self::KEYSETS_TABLE)?;
       table.insert(k, value_serialized.as_str())?;
     }
     self.commit_txn(write_txn)?;
@@ -135,7 +139,7 @@ impl MintDB {
   pub fn get_all_keysets(&self) -> Result<Vec<KeysetWithKeys>> {
     let mut keysets: Vec<KeysetWithKeys> = vec![];
     let read_txn = self.db.begin_read()?;
-    let table = read_txn.open_table(KEYSETS_TABLE)?;
+    let table = read_txn.open_table(Self::KEYSETS_TABLE)?;
 
     table.iter().unwrap().for_each(|keyset| {
       let evt = keyset.unwrap();
@@ -147,12 +151,87 @@ impl MintDB {
     Ok(keysets)
   }
 
+  pub fn get_all_tokens(&self) -> Result<Tokens> {
+    let mut tokens: Tokens = vec![];
+    let read_txn = self.db.begin_read()?;
+    let table = read_txn.open_table(Self::PROOFS_TABLE)?;
+
+    table.iter().unwrap().for_each(|keyset| {
+      let evt = keyset.unwrap();
+      let mint_url = evt.0.value();
+      let mint_proofs = evt.1.value();
+      let mint_proofs_deserialized: Proofs = serde_json::from_str(mint_proofs).unwrap();
+      tokens.push(Token {
+        mint: mint_url.to_string(),
+        proofs: mint_proofs_deserialized,
+      });
+    });
+
+    Ok(tokens)
+  }
+
+  pub fn get_all_proofs_from_mint(&self, mint_url: String) -> Result<Proofs> {
+    let mut proofs: Proofs = vec![];
+    let read_txn = self.db.begin_read()?;
+    let table = read_txn.open_table(Self::PROOFS_TABLE)?;
+
+    if let Ok(Some(mint_proofs)) = table.get(mint_url.as_str()) {
+      let mint_proofs_deserialized: Proofs = serde_json::from_str(mint_proofs.value()).unwrap();
+      proofs = mint_proofs_deserialized
+    };
+
+    Ok(proofs)
+  }
+
   fn begin_write(&self) -> Result<WriteTransaction> {
     Ok(self.db.begin_write()?)
   }
 
   fn commit_txn(&self, write_txn: WriteTransaction) -> Result<()> {
     Ok(write_txn.commit()?)
+  }
+
+  fn initialise_db(db_type: DBType) -> Result<Self> {
+    fs::create_dir_all("db/")?;
+
+    match db_type {
+      DBType::MINT => CashuDatabase::initialise_mint_db(DBType::MINT.into()),
+      DBType::WALLET => CashuDatabase::initialise_mint_db(DBType::WALLET.into()),
+    }
+  }
+
+  fn initialise_mint_db(db_name: &str) -> Result<Self> {
+    let db = Database::create(format!("db/{}.redb", db_name))?;
+
+    let write_txn = db.begin_write()?;
+    write_txn.open_table(Self::KEYSETS_TABLE)?; // this basically just creates the table if doesn't exist
+    write_txn.open_table(Self::KEYPAIRS_TABLE)?; // this basically just creates the table if doesn't exist
+    write_txn.commit()?;
+
+    Ok(Self { db })
+  }
+
+  fn initialise_wallet_db(db_name: &str) -> Result<Self> {
+    let db = Database::create(format!("db/{}.redb", db_name))?;
+
+    let write_txn = db.begin_write()?;
+    write_txn.open_table(Self::PROOFS_TABLE)?; // this basically just creates the table if doesn't exist
+    write_txn.commit()?;
+
+    Ok(Self { db })
+  }
+
+  fn initialise_test_db(db_name: &str) -> Result<Self> {
+    fs::create_dir_all("db/test/")?;
+    let db = Database::create(format!("db/test/{}.redb", db_name))?;
+
+    let write_txn = db.begin_write()?;
+    write_txn.open_table(Self::KEYSETS_TABLE)?; // this basically just creates the table if doesn't exist
+    write_txn.open_table(Self::KEYPAIRS_TABLE)?; // this basically just creates the table if doesn't exist
+    write_txn.open_table(Self::PROOFS_TABLE)?; // this basically just creates the table if doesn't exist
+    write_txn.commit()?;
+
+    Ok(Self { db })
   }
 }
 
@@ -164,7 +243,7 @@ mod tests {
   use serde_json::json;
 
   struct Sut {
-    db: MintDB,
+    db: CashuDatabase,
     db_name: String,
   }
 
@@ -176,7 +255,7 @@ mod tests {
 
   impl Sut {
     fn new(db_name: &str) -> Self {
-      let db = MintDB::new_testing_db(db_name).unwrap();
+      let db = CashuDatabase::new_testing_db(db_name).unwrap();
 
       Self {
         db,
@@ -233,7 +312,7 @@ mod tests {
     }
 
     fn remove_temp_db(&self) {
-      fs::remove_file(format!("db/{}.redb", self.db_name)).unwrap();
+      fs::remove_file(format!("db/test/{}.redb", self.db_name)).unwrap();
     }
   }
 
