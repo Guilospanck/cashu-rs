@@ -2,17 +2,16 @@ use std::result;
 
 use serde::{Deserialize, Serialize};
 
-use bitcoin::{
-  key::Secp256k1,
-  secp256k1::{PublicKey, Scalar},
-};
+use bitcoin::{key::Secp256k1, secp256k1::Scalar};
 
 use crate::{
   database::{CashuDatabase, DBType},
   helpers::hash_to_curve,
   keyset::{generate_keyset_and_keypairs, Keyset, KeysetWithKeys, Keysets},
   rest::{GetKeysResponse, GetKeysetsResponse},
-  types::{BlindSignature, BlindSignatures, BlindedMessage, BlindedMessages, Keypairs, Proofs},
+  types::{
+    BlindSignature, BlindSignatures, BlindedMessage, BlindedMessages, Keypairs, Proof, Proofs,
+  },
 };
 
 /// [`Mint`] error
@@ -20,6 +19,10 @@ use crate::{
 pub enum MintError {
   #[error("Invalid EC math: `{0}`")]
   InvalidECMath(String),
+  #[error("Error verifying proof: `{0}`")]
+  ErrorVerifyingProof(String),
+  #[error("Invalid proof")]
+  InvalidProof,
 }
 
 type Result<T> = result::Result<T, MintError>;
@@ -107,8 +110,23 @@ impl Mint {
     GetKeysetsResponse { keysets }
   }
 
-  pub fn swap_tokens(&self, _inputs: Proofs, _outputs: BlindedMessages) -> Result<BlindSignatures> {
-    unimplemented!()
+  pub fn swap_tokens(&self, inputs: Proofs, _outputs: BlindedMessages) -> Result<BlindSignatures> {
+    // verify inputs
+    for input in inputs {
+      match self.verify_input(input) {
+        Ok(verified) => {
+          if !verified {
+            return Err(MintError::InvalidProof);
+          }
+        }
+        Err(e) => return Err(MintError::ErrorVerifyingProof(e.to_string())),
+      }
+    }
+
+    // invalidate inputs
+    // for input in inputs {}
+
+    Ok(vec![])
   }
 
   // Signs blinded message (an output)
@@ -136,7 +154,9 @@ impl Mint {
   }
 
   // checks that k*hash_to_curve(x) == C
-  pub fn verification(&self, x: Vec<u8>, c: PublicKey) -> Result<bool> {
+  pub fn verify_input(&self, input: Proof) -> Result<bool> {
+    let Proof { secret, c, .. } = input;
+
     // TODO: not sure about this
     let secretkey = self
       .keypairs
@@ -144,6 +164,8 @@ impl Mint {
       .find(|keypair| keypair.pubkey == c)
       .unwrap()
       .secretkey;
+
+    let x = hex::decode(secret).unwrap();
 
     let y = hash_to_curve(x);
     let secp = Secp256k1::new();

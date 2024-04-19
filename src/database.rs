@@ -6,7 +6,7 @@ use strum::{EnumString, IntoStaticStr};
 
 use crate::{
   keyset::KeysetWithKeys,
-  types::{Keypair, Keypairs, Proofs, Token, Tokens},
+  types::{Keypair, Keypairs, Proof, Proofs, Token, Tokens},
 };
 
 /// [`Database`] error
@@ -74,12 +74,18 @@ pub struct CashuDatabase {
 }
 
 impl CashuDatabase {
+  /// MINT
   // keyset_id, KeysetWithKeys
   const KEYSETS_TABLE: TableDefinition<'static, &'static str, &'static str> =
     TableDefinition::new("keysets");
   // pubkey, seckey
   const KEYPAIRS_TABLE: TableDefinition<'static, &'static str, &'static str> =
     TableDefinition::new("keypairs");
+  // date, proof
+  const INVALID_INPUTS_TABLE: TableDefinition<'static, &'static str, &'static str> =
+    TableDefinition::new("invalid_proofs");
+
+  /// WALLET
   // mint_url, proofs
   const PROOFS_TABLE: TableDefinition<'static, &'static str, &'static str> =
     TableDefinition::new("proofs");
@@ -183,6 +189,35 @@ impl CashuDatabase {
     Ok(proofs)
   }
 
+  pub fn write_to_invalid_inputs_table(&mut self, k: &str, v: Proof) -> Result<()> {
+    let invalid_proof_serialized = serde_json::to_string(&v)?;
+
+    let write_txn = self.begin_write()?;
+    {
+      let mut table = write_txn.open_table(Self::INVALID_INPUTS_TABLE)?;
+      table.insert(k, invalid_proof_serialized.as_str())?;
+    }
+    self.commit_txn(write_txn)?;
+    Ok(())
+  }
+
+  pub fn get_all_invalid_inputs(&self) -> Result<Proofs> {
+    let mut proofs: Proofs = vec![];
+    let read_txn = self.db.begin_read()?;
+    let table = read_txn.open_table(Self::INVALID_INPUTS_TABLE)?;
+
+    table.iter().unwrap().for_each(|proof| {
+      let evt = proof.unwrap();
+      let proof = evt.1.value();
+
+      let proof_deserialized: Proof = serde_json::from_str(proof).unwrap();
+
+      proofs.push(proof_deserialized);
+    });
+
+    Ok(proofs)
+  }
+
   fn begin_write(&self) -> Result<WriteTransaction> {
     Ok(self.db.begin_write()?)
   }
@@ -206,6 +241,7 @@ impl CashuDatabase {
     let write_txn = db.begin_write()?;
     write_txn.open_table(Self::KEYSETS_TABLE)?; // this basically just creates the table if doesn't exist
     write_txn.open_table(Self::KEYPAIRS_TABLE)?; // this basically just creates the table if doesn't exist
+    write_txn.open_table(Self::INVALID_INPUTS_TABLE)?; // this basically just creates the table if doesn't exist
     write_txn.commit()?;
 
     Ok(Self { db })
@@ -229,6 +265,7 @@ impl CashuDatabase {
     write_txn.open_table(Self::KEYSETS_TABLE)?; // this basically just creates the table if doesn't exist
     write_txn.open_table(Self::KEYPAIRS_TABLE)?; // this basically just creates the table if doesn't exist
     write_txn.open_table(Self::PROOFS_TABLE)?; // this basically just creates the table if doesn't exist
+    write_txn.open_table(Self::INVALID_INPUTS_TABLE)?; // this basically just creates the table if doesn't exist
     write_txn.commit()?;
 
     Ok(Self { db })
@@ -239,7 +276,8 @@ impl CashuDatabase {
 mod tests {
   use super::*;
 
-  #[cfg(test)]
+  use chrono::Duration;
+#[cfg(test)]
   use serde_json::json;
 
   struct Sut {
@@ -311,6 +349,39 @@ mod tests {
       keypairs
     }
 
+    fn gen_invalid_proofs(&self) -> Proofs {
+      let proof_1 = json!(
+        {
+          "id": "009a1f293253e41e",
+          "secret": "12aba1f293ae53e41e",
+          "amount": 64,
+          "C": PublicKey::from_str("02ec4a46e8d58aa75f03dc40a6ba58330fcb7d2c15ef99f901eca18d9d3bc6ec4e").unwrap(),
+        }
+      );
+      let proof_2 = json!(
+        {
+          "id": "129a1f293253e41e",
+          "secret": "31baaba1f293ae53e41e",
+          "amount": 8,
+          "C": PublicKey::from_str("0205ff05dd6445526443edf55e7d48527fc33c877fe12a7bdd78a2346cf8f3c25c").unwrap(),
+        }
+      );
+      let proof_3 = json!(
+        {
+          "id": "1abcde1f293253e41e",
+          "secret": "44baaba1f293ae53e41e",
+          "amount": 16,
+          "C": PublicKey::from_str("03e6d8b7552150691f196672b4f727317d7318f5a05528019bacc12d559f106706").unwrap(),
+        }
+      );
+      let proof1: Proof = serde_json::from_value(proof_1).unwrap();
+      let proof2: Proof = serde_json::from_value(proof_2).unwrap();
+      let proof3: Proof = serde_json::from_value(proof_3).unwrap();
+
+      let proofs = vec![proof1, proof2, proof3];
+      proofs
+    }
+
     fn remove_temp_db(&self) {
       fs::remove_file(format!("db/test/{}.redb", self.db_name)).unwrap();
     }
@@ -376,6 +447,37 @@ mod tests {
   }
 
   #[test]
+  fn write_to_invalid_inputs_table() {
+    // arrange
+    let mut sut = Sut::new("write_to_invalid_inputs_table");
+    let mock_invalid_inputs = sut.gen_invalid_proofs();
+
+    use chrono::Utc;
+    let dt1 = Utc::now() + Duration::days(1);
+    let dt2 = Utc::now() + Duration::days(2);
+    let dt3 = Utc::now() + Duration::days(3);
+    let timestamp1 = dt1.timestamp().to_string();
+    let timestamp2 = dt2.timestamp().to_string();
+    let timestamp3 = dt3.timestamp().to_string();
+    
+    // act
+    let result = sut.db.get_all_invalid_inputs().unwrap();
+    assert_eq!(result.len(), 0);
+    let _ = sut
+      .db
+      .write_to_invalid_inputs_table(timestamp1.as_str(), mock_invalid_inputs[0].clone());
+    let _ = sut
+      .db
+      .write_to_invalid_inputs_table(timestamp2.as_str(), mock_invalid_inputs[1].clone());
+    let _ = sut
+      .db
+      .write_to_invalid_inputs_table(timestamp3.as_str(), mock_invalid_inputs[2].clone());
+
+    let result = sut.db.get_all_invalid_inputs().unwrap();
+    assert_eq!(result.len(), 3);
+  }
+
+  #[test]
   fn get_all_keysets() {
     let sut = Sut::new("get_all_keysets");
 
@@ -389,6 +491,15 @@ mod tests {
     let sut = Sut::new("get_all_keypairs");
 
     let result = sut.db.get_all_keypairs().unwrap();
+
+    assert_eq!(result.len(), 0);
+  }
+
+  #[test]
+  fn get_all_invalid_inputs() {
+    let sut = Sut::new("get_all_invalid_inputs");
+
+    let result = sut.db.get_all_invalid_inputs().unwrap();
 
     assert_eq!(result.len(), 0);
   }
