@@ -1,7 +1,5 @@
 use std::result;
 
-use serde::{Deserialize, Serialize};
-
 use bitcoin::{key::Secp256k1, secp256k1::Scalar};
 
 use crate::{
@@ -27,10 +25,10 @@ pub enum MintError {
 
 type Result<T> = result::Result<T, MintError>;
 
-#[derive(Debug, Serialize, Deserialize)]
 pub struct Mint {
   keysets: Vec<KeysetWithKeys>,
   keypairs: Keypairs,
+  db: CashuDatabase
 }
 
 impl Mint {
@@ -53,7 +51,7 @@ impl Mint {
       keypairs = generated_keypairs;
     }
 
-    Self { keysets, keypairs }
+    Self { keysets, keypairs, db }
   }
 
   /// A set of all Ks for a set of amounts is called a keyset.
@@ -124,7 +122,9 @@ impl Mint {
     }
 
     // invalidate inputs
-    // for input in inputs {}
+    // for input in inputs {
+    //   println!("input");
+    // }
 
     Ok(vec![])
   }

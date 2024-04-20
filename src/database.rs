@@ -5,8 +5,7 @@ use std::{fs, result, str::FromStr};
 use strum::{EnumString, IntoStaticStr};
 
 use crate::{
-  keyset::KeysetWithKeys,
-  types::{Keypair, Keypairs, Proof, Proofs, Token, Tokens},
+  helpers::sha256_hasher, keyset::KeysetWithKeys, types::{Keypair, Keypairs, Proof, Proofs, Token, Tokens}
 };
 
 /// [`Database`] error
@@ -189,13 +188,15 @@ impl CashuDatabase {
     Ok(proofs)
   }
 
-  pub fn write_to_invalid_inputs_table(&mut self, k: &str, v: Proof) -> Result<()> {
+  pub fn write_to_invalid_inputs_table(&mut self, v: Proof) -> Result<()> {
     let invalid_proof_serialized = serde_json::to_string(&v)?;
+    let key = sha256_hasher(invalid_proof_serialized.as_bytes().to_vec());
+    let key = hex::encode(key);
 
     let write_txn = self.begin_write()?;
     {
       let mut table = write_txn.open_table(Self::INVALID_INPUTS_TABLE)?;
-      table.insert(k, invalid_proof_serialized.as_str())?;
+      table.insert(key.as_str(), invalid_proof_serialized.as_str())?;
     }
     self.commit_txn(write_txn)?;
     Ok(())
@@ -275,8 +276,6 @@ impl CashuDatabase {
 #[cfg(test)]
 mod tests {
   use super::*;
-
-  use chrono::Duration;
 #[cfg(test)]
   use serde_json::json;
 
@@ -450,28 +449,19 @@ mod tests {
   fn write_to_invalid_inputs_table() {
     // arrange
     let mut sut = Sut::new("write_to_invalid_inputs_table");
-    let mock_invalid_inputs = sut.gen_invalid_proofs();
-
-    use chrono::Utc;
-    let dt1 = Utc::now() + Duration::days(1);
-    let dt2 = Utc::now() + Duration::days(2);
-    let dt3 = Utc::now() + Duration::days(3);
-    let timestamp1 = dt1.timestamp().to_string();
-    let timestamp2 = dt2.timestamp().to_string();
-    let timestamp3 = dt3.timestamp().to_string();
-    
+    let mock_invalid_inputs = sut.gen_invalid_proofs();    
     // act
     let result = sut.db.get_all_invalid_inputs().unwrap();
     assert_eq!(result.len(), 0);
     let _ = sut
       .db
-      .write_to_invalid_inputs_table(timestamp1.as_str(), mock_invalid_inputs[0].clone());
+      .write_to_invalid_inputs_table(mock_invalid_inputs[0].clone());
     let _ = sut
       .db
-      .write_to_invalid_inputs_table(timestamp2.as_str(), mock_invalid_inputs[1].clone());
+      .write_to_invalid_inputs_table(mock_invalid_inputs[1].clone());
     let _ = sut
       .db
-      .write_to_invalid_inputs_table(timestamp3.as_str(), mock_invalid_inputs[2].clone());
+      .write_to_invalid_inputs_table(mock_invalid_inputs[2].clone());
 
     let result = sut.db.get_all_invalid_inputs().unwrap();
     assert_eq!(result.len(), 3);
