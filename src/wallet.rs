@@ -59,7 +59,7 @@ impl Wallet {
   // TODO: When constructing outputs for an operation, wallets MUST choose only active keysets
   pub fn swap_tokens(&self) -> Result<()> {
     // Mint Bob publishes public key K = kG
-    let mint = Mint::new();
+    let mut mint = Mint::new();
 
     // Get all keysets
     let mint_keysets = mint.get_v1_keys();

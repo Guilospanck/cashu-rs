@@ -5,7 +5,9 @@ use std::{fs, result, str::FromStr};
 use strum::{EnumString, IntoStaticStr};
 
 use crate::{
-  helpers::sha256_hasher, keyset::KeysetWithKeys, types::{Keypair, Keypairs, Proof, Proofs, Token, Tokens}
+  helpers::sha256_hasher,
+  keyset::KeysetWithKeys,
+  types::{Keypair, Keypairs, Proof, Proofs, Token, Tokens},
 };
 
 /// [`Database`] error
@@ -202,6 +204,22 @@ impl CashuDatabase {
     Ok(())
   }
 
+  pub fn get_invalid_input(&self, proof: Proof) -> Result<Option<Proof>> {
+    let invalid_proof_serialized = serde_json::to_string(&proof)?;
+    let key = sha256_hasher(invalid_proof_serialized.as_bytes().to_vec());
+    let key = hex::encode(key);
+
+    let read_txn = self.db.begin_read()?;
+    let table = read_txn.open_table(Self::INVALID_INPUTS_TABLE)?;
+
+    let response = table.get(key.as_str()).unwrap().map(|proof| {
+      let proof_deserialized: Proof = serde_json::from_str(proof.value()).unwrap();
+      proof_deserialized
+    });
+
+    Ok(response)
+  }
+
   pub fn get_all_invalid_inputs(&self) -> Result<Proofs> {
     let mut proofs: Proofs = vec![];
     let read_txn = self.db.begin_read()?;
@@ -276,7 +294,7 @@ impl CashuDatabase {
 #[cfg(test)]
 mod tests {
   use super::*;
-#[cfg(test)]
+  #[cfg(test)]
   use serde_json::json;
 
   struct Sut {
@@ -449,7 +467,7 @@ mod tests {
   fn write_to_invalid_inputs_table() {
     // arrange
     let mut sut = Sut::new("write_to_invalid_inputs_table");
-    let mock_invalid_inputs = sut.gen_invalid_proofs();    
+    let mock_invalid_inputs = sut.gen_invalid_proofs();
     // act
     let result = sut.db.get_all_invalid_inputs().unwrap();
     assert_eq!(result.len(), 0);
@@ -465,6 +483,12 @@ mod tests {
 
     let result = sut.db.get_all_invalid_inputs().unwrap();
     assert_eq!(result.len(), 3);
+
+    let res = sut
+      .db
+      .get_invalid_input(mock_invalid_inputs[1].clone())
+      .unwrap();
+    assert_eq!(res, Some(mock_invalid_inputs[1].clone()));
   }
 
   #[test]
@@ -492,5 +516,15 @@ mod tests {
     let result = sut.db.get_all_invalid_inputs().unwrap();
 
     assert_eq!(result.len(), 0);
+  }
+
+  #[test]
+  fn get_invalid_input() {
+    let sut = Sut::new("get_invalid_input");
+    let invalid_proofs = sut.gen_invalid_proofs();
+
+    let result = sut.db.get_invalid_input(invalid_proofs[0].clone()).unwrap();
+
+    assert!(result.is_none());
   }
 }

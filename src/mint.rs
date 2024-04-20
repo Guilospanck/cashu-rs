@@ -28,7 +28,7 @@ type Result<T> = result::Result<T, MintError>;
 pub struct Mint {
   keysets: Vec<KeysetWithKeys>,
   keypairs: Keypairs,
-  db: CashuDatabase
+  db: CashuDatabase,
 }
 
 impl Mint {
@@ -51,7 +51,11 @@ impl Mint {
       keypairs = generated_keypairs;
     }
 
-    Self { keysets, keypairs, db }
+    Self {
+      keysets,
+      keypairs,
+      db,
+    }
   }
 
   /// A set of all Ks for a set of amounts is called a keyset.
@@ -108,23 +112,40 @@ impl Mint {
     GetKeysetsResponse { keysets }
   }
 
-  pub fn swap_tokens(&self, inputs: Proofs, _outputs: BlindedMessages) -> Result<BlindSignatures> {
+  pub fn swap_tokens(
+    &mut self,
+    inputs: Proofs,
+    _outputs: BlindedMessages,
+  ) -> Result<BlindSignatures> {
+    let mut proofs_to_be_invalidated: Proofs = vec![];
     // verify inputs
     for input in inputs {
-      match self.verify_input(input) {
+      // check if input is invalid
+      match self.db.get_invalid_input(input.clone()) {
+        Ok(res) => {
+          if let Some(_invalid) = res {
+            return Err(MintError::InvalidProof)
+          }
+
+        },
+        Err(e) => return Err(MintError::ErrorVerifyingProof(e.to_string())),
+      };
+
+      match self.verify_input(input.clone()) {
         Ok(verified) => {
           if !verified {
             return Err(MintError::InvalidProof);
           }
+          proofs_to_be_invalidated.push(input);
         }
         Err(e) => return Err(MintError::ErrorVerifyingProof(e.to_string())),
       }
     }
 
     // invalidate inputs
-    // for input in inputs {
-    //   println!("input");
-    // }
+    for invalid_proof in proofs_to_be_invalidated {
+      let _ = self.db.write_to_invalid_inputs_table(invalid_proof);
+    }
 
     Ok(vec![])
   }
