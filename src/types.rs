@@ -35,7 +35,7 @@ pub type Tokens = Vec<Token>;
 
 /// An encrypted ("blinded") secret and an amount is sent from Alice (wallet) to Bob (mint) for minting tokens or for swapping tokens.
 /// A [`BlindedMessage`] is also called an `output`.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct BlindedMessage {
   /// the value for the requested [`BlindSignature`]
   pub amount: Amount,

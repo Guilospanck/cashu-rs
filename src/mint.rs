@@ -1,6 +1,9 @@
 use std::result;
 
-use bitcoin::{key::Secp256k1, secp256k1::Scalar};
+use bitcoin::{
+  key::Secp256k1,
+  secp256k1::{Scalar, SecretKey},
+};
 
 use crate::{
   database::{CashuDatabase, DBType},
@@ -8,12 +11,13 @@ use crate::{
   keyset::{generate_keyset_and_keypairs, Keyset, KeysetWithKeys, Keysets},
   rest::{GetKeysResponse, GetKeysetsResponse},
   types::{
-    BlindSignature, BlindSignatures, BlindedMessage, BlindedMessages, Keypairs, Proof, Proofs,
+    Amount, BlindSignature, BlindSignatures, BlindedMessage, BlindedMessages, Keypairs, Proof,
+    Proofs,
   },
 };
 
 /// [`Mint`] error
-#[derive(thiserror::Error, Debug)]
+#[derive(thiserror::Error, Debug, PartialEq)]
 pub enum MintError {
   #[error("Invalid EC math: `{0}`")]
   InvalidECMath(String),
@@ -186,13 +190,10 @@ impl Mint {
   pub fn mint_token(&self, message: BlindedMessage) -> Result<BlindSignature> {
     let BlindedMessage { b, id, amount } = message;
 
-    // TODO: not sure about this
-    let secretkey = self
-      .keypairs
-      .iter()
-      .find(|keypair| keypair.pubkey == b)
-      .unwrap()
-      .secretkey;
+    let secretkey = match self.get_secret_key_from_keyset_id_and_amount(id.clone(), amount) {
+      Ok(s) => s,
+      Err(e) => return Err(e),
+    };
 
     let secp = Secp256k1::new();
     let scalar = Scalar::from(secretkey);
@@ -215,25 +216,9 @@ impl Mint {
       amount,
     } = input;
 
-    // Get secretkey used to create the blind signature
-    let secretkey = match self.keysets.iter().find(|keyset| keyset.id == id) {
-      Some(keyset) => {
-        let publickey = keyset.keys.get(&amount);
-        if publickey.is_none() {
-          return Err(MintError::InvalidProof);
-        }
-
-        let secretkey = self
-          .keypairs
-          .iter()
-          .find(|keypair| keypair.pubkey == *publickey.unwrap());
-        if secretkey.is_none() {
-          return Err(MintError::InvalidProof);
-        }
-
-        secretkey.unwrap().secretkey
-      }
-      None => return Err(MintError::InvalidProof),
+    let secretkey = match self.get_secret_key_from_keyset_id_and_amount(id, amount) {
+      Ok(s) => s,
+      Err(e) => return Err(e),
     };
 
     let x = hex::decode(secret).unwrap();
@@ -254,13 +239,42 @@ impl Mint {
 
     Ok(c == ky)
   }
+
+  fn get_secret_key_from_keyset_id_and_amount(
+    &self,
+    keyset_id: String,
+    amount: Amount,
+  ) -> Result<SecretKey> {
+    // Get secretkey used to create the blind signature
+    let secretkey = match self.keysets.iter().find(|keyset| keyset.id == keyset_id) {
+      Some(keyset) => {
+        let publickey = keyset.keys.get(&amount);
+        if publickey.is_none() {
+          return Err(MintError::InvalidProof);
+        }
+
+        let secretkey = self
+          .keypairs
+          .iter()
+          .find(|keypair| keypair.pubkey == *publickey.unwrap());
+        if secretkey.is_none() {
+          return Err(MintError::InvalidProof);
+        }
+
+        secretkey.unwrap().secretkey
+      }
+      None => return Err(MintError::InvalidProof),
+    };
+
+    Ok(secretkey)
+  }
 }
 
 #[cfg(test)]
 mod tests {
   use bitcoin::secp256k1::{PublicKey, SecretKey};
   use serde_json::json;
-  use std::str::FromStr;
+  use std::{fs, str::FromStr};
 
   use crate::types::Keypair;
 
@@ -268,14 +282,25 @@ mod tests {
 
   struct Sut {
     mint: Mint,
+    db_name: String,
   }
+
+  impl Drop for Sut {
+    fn drop(&mut self) {
+      self.remove_temp_db();
+    }
+  }
+
   impl Sut {
     fn new(db_name: &str) -> Self {
       let keypairs = Self::gen_keypairs();
       let keyset = Self::gen_keyset();
       let mint = Mint::new_testing_mint(db_name, keyset, keypairs);
 
-      Self { mint }
+      Self {
+        mint,
+        db_name: db_name.to_string(),
+      }
     }
 
     fn gen_keypairs() -> Keypairs {
@@ -361,26 +386,26 @@ mod tests {
     fn gen_proofs_not_created_from_this_mint() -> Proofs {
       let proof_1 = json!(
         {
-          "id": "009a1f293253e41e",
-          "secret": "12aba1f293ae53e41e",
-          "amount": 64,
+          "id": "009a1f293253e41e", // same id as the keyset
+          "secret": "12aba1f293ae53e41e", // c != ky
+          "amount": 1,
           "C": PublicKey::from_str("02ec4a46e8d58aa75f03dc40a6ba58330fcb7d2c15ef99f901eca18d9d3bc6ec4e").unwrap(),
         }
       );
       let proof_2 = json!(
         {
-          "id": "129a1f293253e41e",
-          "secret": "31baaba1f293ae53e41e",
-          "amount": 8,
-          "C": PublicKey::from_str("0205ff05dd6445526443edf55e7d48527fc33c877fe12a7bdd78a2346cf8f3c25c").unwrap(),
+          "id": "009a1f293253e41e", // same id as the keyset
+          "secret": "31baaba1f293ae53e41e", // c == ky (if the amount is 2)
+          "amount": 64, // amount not supported by mint
+          "C": PublicKey::from_str("02393a930aff0ed1acba8292dc13d666c22210c81183a355f060d3e73d5176ed19").unwrap(),
         }
       );
       let proof_3 = json!(
         {
-          "id": "1abcde1f293253e41e",
-          "secret": "44baaba1f293ae53e41e",
-          "amount": 16,
-          "C": PublicKey::from_str("03e6d8b7552150691f196672b4f727317d7318f5a05528019bacc12d559f106706").unwrap(),
+          "id": "deadbeef", // wrong keysetid
+          "secret": "44baaba1f293ae53e41e", // c == ky (if the amount is 4)
+          "amount": 4,
+          "C": PublicKey::from_str("0205fc448d731e91488e3ec5c15c59dcf671edad677955cd978153302c1a5af4ea").unwrap(),
         }
       );
       let proof1: Proof = serde_json::from_value(proof_1).unwrap();
@@ -390,19 +415,85 @@ mod tests {
       let proofs = vec![proof1, proof2, proof3];
       proofs
     }
+
+    fn gen_blinded_messages() -> BlindedMessages {
+      let blinded_message_1 = json!(
+        {
+          "id": "009a1f293253e41e", // same id as the keyset
+          "amount": 1,
+          "B_": PublicKey::from_str("02d4ecdbc6daf91de5165562108ee7313d4e6a0d92dee9c9c52eec905b2ae283b5").unwrap(),
+        }
+      );
+      let blinded_message_2 = json!(
+        {
+          "id": "009a1f293253e41e", // same id as the keyset
+          "amount": 2,
+          "B_": PublicKey::from_str("03f09469008c9bd9eeb0e1452e7bdd4ee4dc5f2dabdb997024997b156c5cbc3058").unwrap(),
+        }
+      );
+      let blinded_message_3 = json!(
+        {
+          "id": "009a1f293253e41e", // same id as the keyset
+          "amount": 4,
+          "B_": PublicKey::from_str("035b2531e2ba24d3720413fb691dba27a67a6d165df553d1d5bc428973c547623c").unwrap(),
+        }
+      );
+      let blinded_message1: BlindedMessage = serde_json::from_value(blinded_message_1).unwrap();
+      let blinded_message2: BlindedMessage = serde_json::from_value(blinded_message_2).unwrap();
+      let blinded_message3: BlindedMessage = serde_json::from_value(blinded_message_3).unwrap();
+
+      let blinded_messages = vec![blinded_message1, blinded_message2, blinded_message3];
+      blinded_messages
+    }
+
+    fn remove_temp_db(&self) {
+      fs::remove_file(format!("db/test/{}.redb", self.db_name)).unwrap();
+    }
   }
 
   #[test]
   fn verify_input() {
     let sut = Sut::new("verify_input");
     let valid_proofs = Sut::gen_proofs_created_from_this_mint();
-    let _not_valid_proofs = Sut::gen_proofs_not_created_from_this_mint();
+    let not_valid_proofs = Sut::gen_proofs_not_created_from_this_mint();
 
+    // valid proofs for this mint
     let result0 = sut.mint.verify_input(valid_proofs[0].clone()).unwrap();
     assert!(result0);
     let result1 = sut.mint.verify_input(valid_proofs[1].clone()).unwrap();
     assert!(result1);
     let result2 = sut.mint.verify_input(valid_proofs[2].clone()).unwrap();
     assert!(result2);
+
+    // c != ky
+    let result0 = sut.mint.verify_input(not_valid_proofs[0].clone()).unwrap();
+    assert!(!result0);
+
+    // amount not supported by mint
+    let result1 = sut.mint.verify_input(not_valid_proofs[1].clone());
+    assert!(result1.is_err_and(|x| x == MintError::InvalidProof));
+
+    // keyset id not found
+    let result2 = sut.mint.verify_input(not_valid_proofs[2].clone());
+    assert!(result2.is_err_and(|x| x == MintError::InvalidProof));
+  }
+
+  #[test]
+  fn swap_tokens() {
+    let mut sut = Sut::new("swap_tokens");
+    let outputs = Sut::gen_blinded_messages();
+    let mut outputs_with_wrong_amount = outputs.clone();
+    outputs_with_wrong_amount[0].amount = 64;
+    let inputs = Sut::gen_proofs_created_from_this_mint();
+
+    // amounts don't match
+    let res_amounts_dont_match = sut
+      .mint
+      .swap_tokens(inputs.clone(), outputs_with_wrong_amount);
+    assert!(res_amounts_dont_match.is_err_and(|x| x == MintError::AmountsDoNotMatch));
+
+    // first time swapping tokens should work
+    let res_ok = sut.mint.swap_tokens(inputs, outputs);
+    assert!(res_ok.is_ok_and(|x| x.len() == 3));
   }
 }
