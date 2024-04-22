@@ -484,16 +484,26 @@ mod tests {
     let outputs = Sut::gen_blinded_messages();
     let mut outputs_with_wrong_amount = outputs.clone();
     outputs_with_wrong_amount[0].amount = 64;
-    let inputs = Sut::gen_proofs_created_from_this_mint();
+    let valid_inputs = Sut::gen_proofs_created_from_this_mint();
+    let mut not_valid_proofs = Sut::gen_proofs_not_created_from_this_mint();
+    not_valid_proofs[1].amount = 2; // So we match the amounts
 
     // amounts don't match
     let res_amounts_dont_match = sut
       .mint
-      .swap_tokens(inputs.clone(), outputs_with_wrong_amount);
+      .swap_tokens(valid_inputs.clone(), outputs_with_wrong_amount);
     assert!(res_amounts_dont_match.is_err_and(|x| x == MintError::AmountsDoNotMatch));
 
     // first time swapping tokens should work
-    let res_ok = sut.mint.swap_tokens(inputs, outputs);
+    let res_ok = sut.mint.swap_tokens(valid_inputs.clone(), outputs.clone());
     assert!(res_ok.is_ok_and(|x| x.len() == 3));
+
+    // second time swapping tokens should not work (tokens should be invalidated)
+    let res_ok = sut.mint.swap_tokens(valid_inputs, outputs.clone());
+    assert!(res_ok.is_err_and(|x| x == MintError::InvalidProof));
+
+    // using not valid proofs should not work
+    let res_ok = sut.mint.swap_tokens(not_valid_proofs, outputs);
+    assert!(res_ok.is_err_and(|x| x == MintError::InvalidProof));
   }
 }
