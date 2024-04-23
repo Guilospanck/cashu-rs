@@ -446,6 +446,66 @@ mod tests {
       blinded_messages
     }
 
+    fn gen_invalid_blinded_messages() -> BlindedMessages {
+      let blinded_message_1 = json!(
+        {
+          "id": "109a1f293253e41e", // different id from the keyset
+          "amount": 1,
+          "B_": PublicKey::from_str("02d4ecdbc6daf91de5165562108ee7313d4e6a0d92dee9c9c52eec905b2ae283b5").unwrap(),
+        }
+      );
+      let blinded_message_2 = json!(
+        {
+          "id": "209a1f293253e41e", // different id from the keyset
+          "amount": 2,
+          "B_": PublicKey::from_str("03f09469008c9bd9eeb0e1452e7bdd4ee4dc5f2dabdb997024997b156c5cbc3058").unwrap(),
+        }
+      );
+      let blinded_message_3 = json!(
+        {
+          "id": "309a1f293253e41e", // different id from the keyset
+          "amount": 4,
+          "B_": PublicKey::from_str("035b2531e2ba24d3720413fb691dba27a67a6d165df553d1d5bc428973c547623c").unwrap(),
+        }
+      );
+      let blinded_message1: BlindedMessage = serde_json::from_value(blinded_message_1).unwrap();
+      let blinded_message2: BlindedMessage = serde_json::from_value(blinded_message_2).unwrap();
+      let blinded_message3: BlindedMessage = serde_json::from_value(blinded_message_3).unwrap();
+
+      let blinded_messages = vec![blinded_message1, blinded_message2, blinded_message3];
+      blinded_messages
+    }
+
+    fn gen_blind_signatures() -> BlindSignatures {
+      let keypairs = Sut::gen_keypairs();
+      let blinded_messages = Sut::gen_blinded_messages();
+      let secp = Secp256k1::new();
+
+      let mut blinded_signatures: BlindSignatures = vec![];
+
+      for (i, keypair) in keypairs.iter().enumerate() {
+        let secretkey = keypair.secretkey;
+        let b_ = blinded_messages[i].b;
+
+        let scalar = Scalar::from(secretkey);
+        // calculate C_ = kB_
+        let c_ = match b_.mul_tweak(&secp, &scalar) {
+          Ok(c) => c,
+          Err(_e) => panic!(),
+        };
+  
+        let blind_signature = BlindSignature {
+          c: c_,
+          amount: blinded_messages[i].amount,
+          id: blinded_messages[i].clone().id,
+        };
+
+        blinded_signatures.push(blind_signature);
+      }
+
+      blinded_signatures
+    }
+
     fn remove_temp_db(&self) {
       fs::remove_file(format!("db/test/{}.redb", self.db_name)).unwrap();
     }
@@ -496,7 +556,7 @@ mod tests {
 
     // first time swapping tokens should work
     let res_ok = sut.mint.swap_tokens(valid_inputs.clone(), outputs.clone());
-    assert!(res_ok.is_ok_and(|x| x.len() == 3));
+    assert!(res_ok.is_ok_and(|x| x.len() == outputs.len()));
 
     // second time swapping tokens should not work (tokens should be invalidated)
     let res_ok = sut.mint.swap_tokens(valid_inputs, outputs.clone());
@@ -505,5 +565,25 @@ mod tests {
     // using not valid proofs should not work
     let res_ok = sut.mint.swap_tokens(not_valid_proofs, outputs);
     assert!(res_ok.is_err_and(|x| x == MintError::InvalidProof));
+  }
+
+  #[test]
+  fn mint_tokens() {
+    let sut = Sut::new("mint_token");
+    let valid_outputs = Sut::gen_blinded_messages();
+    let invalid_outputs = Sut::gen_invalid_blinded_messages();
+    let expected_signatures = Sut::gen_blind_signatures();
+
+    // valid outputs
+    for i in 0..valid_outputs.len() {
+      let res_ok = sut.mint.mint_token(valid_outputs[i].clone()).unwrap();
+      assert_eq!(res_ok, expected_signatures[i]); 
+    }
+
+    // invalid outputs
+    for invalid_output in invalid_outputs {
+      let res_ok = sut.mint.mint_token(invalid_output);
+      assert!(res_ok.is_err_and(|x| x == MintError::InvalidProof));
+    }
   }
 }

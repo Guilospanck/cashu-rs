@@ -50,7 +50,7 @@ pub type BlindedMessages = Vec<BlindedMessage>;
 
 /// A [`BlindSignature`] is sent from Bob (mint) to Alice (wallet) after minting tokens or after swapping tokens.
 /// A [`BlindSignature`] is also called a `promise`.
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct BlindSignature {
   /// value of the blinded token
   pub amount: Amount,
