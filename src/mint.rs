@@ -586,4 +586,27 @@ mod tests {
       assert!(res_ok.is_err_and(|x| x == MintError::InvalidProof));
     }
   }
+
+  #[test]
+  fn get_secret_key_from_keyset_id_and_amount() {
+    let sut = Sut::new("get_secret_key_from_keyset_id_and_amount");
+    let keyset = Sut::gen_keyset();
+    let keypairs = Sut::gen_keypairs();
+    let keyset_id = keyset.id;
+    let keys = keyset.keys;
+
+    // valid amounts and keyset_id
+    for (idx, (amount, _)) in keys.iter().enumerate() {
+      let res_ok = sut.mint.get_secret_key_from_keyset_id_and_amount(keyset_id.clone(), *amount).unwrap();
+      assert_eq!(res_ok, keypairs[idx].secretkey); 
+    }
+
+    // valid keyset_id, invalid amount
+    let res_ok = sut.mint.get_secret_key_from_keyset_id_and_amount(keyset_id, 256);
+    assert!(res_ok.is_err_and(|x| x == MintError::InvalidProof));
+
+    // invalid keyset_id, valid amount
+    let res_ok = sut.mint.get_secret_key_from_keyset_id_and_amount("deadbeef".to_string(), 1);
+    assert!(res_ok.is_err_and(|x| x == MintError::InvalidProof));
+  }
 }
