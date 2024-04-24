@@ -5,14 +5,18 @@ use bitcoin::{
   secp256k1::{Scalar, SecretKey},
 };
 
+use chrono::Utc;
+
+use uuid::Uuid;
+
 use crate::{
   database::{CashuDatabase, DBType},
   helpers::hash_to_curve,
   keyset::{generate_keyset_and_keypairs, Keyset, KeysetWithKeys, Keysets},
-  rest::{GetKeysResponse, GetKeysetsResponse},
+  rest::{GetKeysResponse, GetKeysetsResponse, PostMintQuoteBolt11Response},
   types::{
-    Amount, BlindSignature, BlindSignatures, BlindedMessage, BlindedMessages, Keypairs, Proof,
-    Proofs,
+    Amount, BlindSignature, BlindSignatures, BlindedMessage, BlindedMessages, Keypairs,
+    PaymentMethod, Proof, Proofs, Unit,
   },
 };
 
@@ -27,6 +31,8 @@ pub enum MintError {
   InvalidProof,
   #[error("Amounts don't match")]
   AmountsDoNotMatch,
+  #[error("Payment method not supported")]
+  PaymentMethodNotSupported,
 }
 
 type Result<T> = result::Result<T, MintError>;
@@ -184,6 +190,36 @@ impl Mint {
     }
 
     Ok(promises)
+  }
+
+  /// The wallet MUST store the `amount` in the request and the `quote` id in the response
+  /// in its database so it can later request the tokens after paying the request.
+  pub fn mint_quote(
+    &self,
+    method: PaymentMethod,
+    _amount: Amount,
+    _unit: Unit,
+  ) -> Result<PostMintQuoteBolt11Response> {
+    if method != PaymentMethod::BOLT11 {
+      return Err(MintError::PaymentMethodNotSupported);
+    }
+
+    let quote: String = Uuid::new_v4().to_string();
+
+    // TODO: generate bolt11 invoice using `amount` and `unit`
+    let request = "lntb30m1pw2f2yspp5s59w4a0kjecw3zyexm7zur8l8n4scw674w".to_string();
+
+    let paid = false;
+
+    // valid for 1h
+    let expiry: i64 = Utc::now().timestamp() + 3600;
+
+    Ok(PostMintQuoteBolt11Response {
+      quote,
+      request,
+      paid,
+      expiry,
+    })
   }
 
   // Signs blinded message (an output)
@@ -493,7 +529,7 @@ mod tests {
           Ok(c) => c,
           Err(_e) => panic!(),
         };
-  
+
         let blind_signature = BlindSignature {
           c: c_,
           amount: blinded_messages[i].amount,
@@ -577,7 +613,7 @@ mod tests {
     // valid outputs
     for i in 0..valid_outputs.len() {
       let res_ok = sut.mint.mint_token(valid_outputs[i].clone()).unwrap();
-      assert_eq!(res_ok, expected_signatures[i]); 
+      assert_eq!(res_ok, expected_signatures[i]);
     }
 
     // invalid outputs
@@ -597,16 +633,23 @@ mod tests {
 
     // valid amounts and keyset_id
     for (idx, (amount, _)) in keys.iter().enumerate() {
-      let res_ok = sut.mint.get_secret_key_from_keyset_id_and_amount(keyset_id.clone(), *amount).unwrap();
-      assert_eq!(res_ok, keypairs[idx].secretkey); 
+      let res_ok = sut
+        .mint
+        .get_secret_key_from_keyset_id_and_amount(keyset_id.clone(), *amount)
+        .unwrap();
+      assert_eq!(res_ok, keypairs[idx].secretkey);
     }
 
     // valid keyset_id, invalid amount
-    let res_ok = sut.mint.get_secret_key_from_keyset_id_and_amount(keyset_id, 256);
+    let res_ok = sut
+      .mint
+      .get_secret_key_from_keyset_id_and_amount(keyset_id, 256);
     assert!(res_ok.is_err_and(|x| x == MintError::InvalidProof));
 
     // invalid keyset_id, valid amount
-    let res_ok = sut.mint.get_secret_key_from_keyset_id_and_amount("deadbeef".to_string(), 1);
+    let res_ok = sut
+      .mint
+      .get_secret_key_from_keyset_id_and_amount("deadbeef".to_string(), 1);
     assert!(res_ok.is_err_and(|x| x == MintError::InvalidProof));
   }
 }

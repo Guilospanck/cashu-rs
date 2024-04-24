@@ -9,6 +9,7 @@ Work in progress.
 - [x] [NUT-00](https://github.com/cashubtc/nuts/blob/main/00.md)
 - [x] [NUT-01](https://github.com/cashubtc/nuts/blob/main/01.md)
 - [x] [NUT-02](https://github.com/cashubtc/nuts/blob/main/02.md)
+- [x] [NUT-03](https://github.com/cashubtc/nuts/blob/main/03.md)
 
 ## TODO
 

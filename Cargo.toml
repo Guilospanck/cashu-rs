@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 base64 = "0.22.0"
 bitcoin = { version = "0.30.0", features = ["rand", "serde"] }
+chrono = "0.4.38"
 hex = "0.4.3"
 rand = { version = "0.8.5",  features = ["std"] }
 redb = "2.0.0"
@@ -16,3 +17,4 @@ serde_json = "1.0.115"
 sha2 = "0.10.8"
 strum = { version = "0.26.2", features = ["derive", "strum_macros"] }
 thiserror = "1.0.58"
+uuid = { version = "1.8.0", features = ["v4"] }

@@ -90,3 +90,20 @@ impl<'de> Deserialize<'de> for Unit {
       Unit::from_str(&s.to_lowercase()).map_err(serde::de::Error::custom)
   }
 }
+
+#[allow(clippy::upper_case_acronyms)]
+#[derive(Debug, PartialEq, Serialize, Clone, EnumString)]
+#[strum(serialize_all = "lowercase")]
+pub enum PaymentMethod {
+  BOLT11,
+}
+
+impl<'de> Deserialize<'de> for PaymentMethod {
+  fn deserialize<D>(deserializer: D) -> Result<PaymentMethod, D::Error>
+  where
+      D: Deserializer<'de>,
+  {
+      let s: String = Deserialize::deserialize(deserializer)?;
+      PaymentMethod::from_str(&s.to_lowercase()).map_err(serde::de::Error::custom)
+  }
+}
