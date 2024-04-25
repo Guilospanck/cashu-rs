@@ -604,6 +604,32 @@ mod tests {
   }
 
   #[test]
+  fn mint_quote() {
+    let sut = Sut::new("mint_quote");
+    let amount = 1;
+    let unit = Unit::SAT;
+    let expected_expiry = Utc::now().timestamp() + 3600;
+    let expected_response = PostMintQuoteBolt11Response {
+      expiry: expected_expiry,
+      paid: false,
+      quote: "some-random-string".to_string(),
+      request: "bolt11invoicerequest".to_string(),
+    };
+
+    // valid payment method
+    let payment_method = PaymentMethod::BOLT11;
+    let res_ok = sut.mint.mint_quote(payment_method, amount, unit.clone()).unwrap();
+    assert_eq!(res_ok.paid, expected_response.paid);
+    assert_eq!(res_ok.expiry, expected_response.expiry);
+    assert!(res_ok.request.starts_with("ln"));
+    
+    // invalid payment method
+    let payment_method = PaymentMethod::OTHER;
+    let res_ok = sut.mint.mint_quote(payment_method, amount, unit);
+    assert!(res_ok.is_err_and(|x| x == MintError::PaymentMethodNotSupported));
+  }
+
+  #[test]
   fn mint_tokens() {
     let sut = Sut::new("mint_token");
     let valid_outputs = Sut::gen_blinded_messages();

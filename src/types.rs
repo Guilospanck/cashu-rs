@@ -96,6 +96,7 @@ impl<'de> Deserialize<'de> for Unit {
 #[strum(serialize_all = "lowercase")]
 pub enum PaymentMethod {
   BOLT11,
+  OTHER
 }
 
 impl<'de> Deserialize<'de> for PaymentMethod {
