@@ -222,6 +222,10 @@ impl Mint {
     })
   }
 
+  pub fn check_mint_paid(&self, _quote: String) -> Result<()> {
+    unimplemented!()
+  }
+
   // Signs blinded message (an output)
   pub fn mint_token(&self, message: BlindedMessage) -> Result<BlindSignature> {
     let BlindedMessage { b, id, amount } = message;

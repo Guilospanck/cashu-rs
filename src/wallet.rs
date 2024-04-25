@@ -6,9 +6,10 @@ use crate::{
   database::{CashuDatabase, DBType},
   helpers::{generate_key_pair, hash_to_curve},
   mint::Mint,
+  rest::PostMintQuoteBolt11Response,
   types::{
-    Amount, BlindSignature, BlindSignatures, BlindedMessage, BlindedMessages, Proof, Proofs, Token,
-    Tokens, Unit,
+    Amount, BlindSignature, BlindSignatures, BlindedMessage, BlindedMessages, PaymentMethod, Proof,
+    Proofs, Token, Tokens, Unit,
   },
 };
 
@@ -30,6 +31,8 @@ pub enum WalletError {
   CouldNotMintToken(String),
   #[error("Could not verify token: `{0}`")]
   CouldNotVerifyToken(String),
+  #[error("Could not mint quote: `{0}`")]
+  CouldNotMintQuote(String),
 }
 
 type Result<T> = result::Result<T, WalletError>;
@@ -64,9 +67,10 @@ impl Wallet {
     // Get all keysets
     let mint_keysets = mint.get_v1_keys();
     let sat_keyset = mint_keysets
-    .keysets
-    .iter()
-    .find(|keyset| keyset.unit == Unit::SAT).unwrap();
+      .keysets
+      .iter()
+      .find(|keyset| keyset.unit == Unit::SAT)
+      .unwrap();
     let mint_sat_keys = &sat_keyset.keys;
 
     // Get all tokens (in wallet database) from this mint
@@ -95,7 +99,8 @@ impl Wallet {
       let x_vec = hex::decode(proof.secret.clone()).unwrap();
       // Computes `B_ = Y + rG`, with r being a random blinding factor (blinding)
       // TODO: here it looks like we can change the amount, so we request different pocket change tokens from mint
-      let blinded_message = match self.blind(x_vec, blinding_factor, proof.amount, proof.id.clone()) {
+      let blinded_message = match self.blind(x_vec, blinding_factor, proof.amount, proof.id.clone())
+      {
         Ok(value) => value,
         Err(e) => return Err(WalletError::BlindError(e.to_string())),
       };
@@ -143,7 +148,23 @@ impl Wallet {
     Ok(())
   }
 
-  pub fn blind(
+  // TODO: The wallet MUST store the `amount` in the request and
+  // TODO: the `quote id` in the response in its database so it can later request the tokens after paying the request.
+  pub fn mint_quote(
+    &self,
+    method: PaymentMethod,
+    amount: Amount,
+    unit: Unit,
+  ) -> Result<PostMintQuoteBolt11Response> {
+    let mint = Mint::new();
+
+    match mint.mint_quote(method, amount, unit) {
+      Ok(mint_quote) => Ok(mint_quote),
+      Err(e) => Err(WalletError::CouldNotMintQuote(e.to_string())),
+    }
+  }
+
+  fn blind(
     &self,
     x: Vec<u8>,
     blinding_factor: SecretKey,
@@ -174,7 +195,7 @@ impl Wallet {
     })
   }
 
-  pub fn unblind(
+  fn unblind(
     &self,
     pubkey: PublicKey,
     blind_signature: BlindSignature,

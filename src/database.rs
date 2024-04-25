@@ -7,6 +7,7 @@ use strum::{EnumString, IntoStaticStr};
 use crate::{
   helpers::sha256_hasher,
   keyset::KeysetWithKeys,
+  rest::PostMintQuoteBolt11Response,
   types::{Keypair, Keypairs, Proof, Proofs, Token, Tokens},
 };
 
@@ -85,6 +86,9 @@ impl CashuDatabase {
   // date, proof
   const INVALID_INPUTS_TABLE: TableDefinition<'static, &'static str, &'static str> =
     TableDefinition::new("invalid_proofs");
+  // quote_id, PostMintQuoteBolt11Response
+  const MINT_QUOTES_TABLE: TableDefinition<'static, &'static str, &'static str> =
+    TableDefinition::new("mint_quotes");
 
   /// WALLET
   // mint_url, proofs
@@ -237,6 +241,49 @@ impl CashuDatabase {
     Ok(proofs)
   }
 
+  pub fn write_to_mint_quotes_table(&mut self, v: PostMintQuoteBolt11Response) -> Result<()> {
+    let quote_id = v.clone().quote;
+    let mint_quote_serialized = serde_json::to_string(&v)?;
+    let write_txn = self.begin_write()?;
+    {
+      let mut table = write_txn.open_table(Self::MINT_QUOTES_TABLE)?;
+      table.insert(quote_id.as_str(), mint_quote_serialized.as_str())?;
+    }
+    self.commit_txn(write_txn)?;
+    Ok(())
+  }
+
+  pub fn get_mint_quote(&self, quote_id: String) -> Result<Option<PostMintQuoteBolt11Response>> {
+    let read_txn = self.db.begin_read()?;
+    let table = read_txn.open_table(Self::MINT_QUOTES_TABLE)?;
+
+    let response = table.get(quote_id.as_str()).unwrap().map(|mint_quote| {
+      let mint_quote_deserialized: PostMintQuoteBolt11Response =
+        serde_json::from_str(mint_quote.value()).unwrap();
+      mint_quote_deserialized
+    });
+
+    Ok(response)
+  }
+
+  pub fn get_all_mint_quotes(&self) -> Result<Vec<PostMintQuoteBolt11Response>> {
+    let mut mint_quotes: Vec<PostMintQuoteBolt11Response> = vec![];
+    let read_txn = self.db.begin_read()?;
+    let table = read_txn.open_table(Self::MINT_QUOTES_TABLE)?;
+
+    table.iter().unwrap().for_each(|db_mint_quote| {
+      let evt = db_mint_quote.unwrap();
+      let mint_quote = evt.1.value();
+
+      let mint_quote_deserialized: PostMintQuoteBolt11Response =
+        serde_json::from_str(mint_quote).unwrap();
+
+      mint_quotes.push(mint_quote_deserialized);
+    });
+
+    Ok(mint_quotes)
+  }
+
   fn begin_write(&self) -> Result<WriteTransaction> {
     Ok(self.db.begin_write()?)
   }
@@ -261,6 +308,7 @@ impl CashuDatabase {
     write_txn.open_table(Self::KEYSETS_TABLE)?; // this basically just creates the table if doesn't exist
     write_txn.open_table(Self::KEYPAIRS_TABLE)?; // this basically just creates the table if doesn't exist
     write_txn.open_table(Self::INVALID_INPUTS_TABLE)?; // this basically just creates the table if doesn't exist
+    write_txn.open_table(Self::MINT_QUOTES_TABLE)?; // this basically just creates the table if doesn't exist
     write_txn.commit()?;
 
     Ok(Self { db })
@@ -285,6 +333,7 @@ impl CashuDatabase {
     write_txn.open_table(Self::KEYPAIRS_TABLE)?; // this basically just creates the table if doesn't exist
     write_txn.open_table(Self::PROOFS_TABLE)?; // this basically just creates the table if doesn't exist
     write_txn.open_table(Self::INVALID_INPUTS_TABLE)?; // this basically just creates the table if doesn't exist
+    write_txn.open_table(Self::MINT_QUOTES_TABLE)?; // this basically just creates the table if doesn't exist
     write_txn.commit()?;
 
     Ok(Self { db })
@@ -399,6 +448,29 @@ mod tests {
       proofs
     }
 
+    fn gen_mint_quotes(&self) -> Vec<PostMintQuoteBolt11Response> {
+      let quote1 = PostMintQuoteBolt11Response {
+        expiry: 1714038710,
+        quote: "f3091ac2-3ba7-442e-a330-2d12bf5d3a95".to_string(),
+        paid: false,
+        request: "ln1230940something".to_string(),
+      };
+      let quote2 = PostMintQuoteBolt11Response {
+        expiry: 1814038710,
+        quote: "e3091ac2-3ba7-442e-a330-2d12bf5d3a95".to_string(),
+        paid: true,
+        request: "ln2230940something".to_string(),
+      };
+      let quote3 = PostMintQuoteBolt11Response {
+        expiry: 1914038710,
+        quote: "d3091ac2-3ba7-442e-a330-2d12bf5d3a95".to_string(),
+        paid: false,
+        request: "ln3230940something".to_string(),
+      };
+
+      [quote1, quote2, quote3].to_vec()
+    }
+
     fn remove_temp_db(&self) {
       fs::remove_file(format!("db/test/{}.redb", self.db_name)).unwrap();
     }
@@ -492,6 +564,35 @@ mod tests {
   }
 
   #[test]
+  fn write_to_mint_quotes_table() {
+    // arrange
+    let mut sut = Sut::new("write_to_mint_quotes_table");
+    let mock_mint_quotes = sut.gen_mint_quotes();
+
+    // act
+    let result = sut.db.get_all_mint_quotes().unwrap();
+    assert_eq!(result.len(), 0);
+    let _ = sut
+      .db
+      .write_to_mint_quotes_table(mock_mint_quotes[0].clone());
+    let _ = sut
+      .db
+      .write_to_mint_quotes_table(mock_mint_quotes[1].clone());
+    let _ = sut
+      .db
+      .write_to_mint_quotes_table(mock_mint_quotes[2].clone());
+
+    let result = sut.db.get_all_mint_quotes().unwrap();
+    assert_eq!(result.len(), 3);
+
+    let res = sut
+      .db
+      .get_mint_quote(mock_mint_quotes[1].clone().quote)
+      .unwrap();
+    assert_eq!(res, Some(mock_mint_quotes[1].clone()));
+  }
+
+  #[test]
   fn get_all_keysets() {
     let sut = Sut::new("get_all_keysets");
 
@@ -526,5 +627,24 @@ mod tests {
     let result = sut.db.get_invalid_input(invalid_proofs[0].clone()).unwrap();
 
     assert!(result.is_none());
+  }
+
+  #[test]
+  fn get_mint_quote() {
+    let sut = Sut::new("get_mint_quote");
+    let quote_id = "some-random=id".to_string();
+
+    let result = sut.db.get_mint_quote(quote_id).unwrap();
+
+    assert!(result.is_none());
+  }
+
+  #[test]
+  fn get_all_mint_quotes() {
+    let sut = Sut::new("get_all_mint_quotes");
+
+    let result = sut.db.get_all_mint_quotes().unwrap();
+
+    assert_eq!(result.len(), 0);
   }
 }
