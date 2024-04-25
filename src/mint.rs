@@ -33,6 +33,10 @@ pub enum MintError {
   AmountsDoNotMatch,
   #[error("Payment method not supported")]
   PaymentMethodNotSupported,
+  #[error("Could not create mint quote: `{0}`")]
+  CouldNotCreateMintQuote(String),
+  #[error("Mint quote not found: `{0}`")]
+  MintQuoteNotFound(String),
 }
 
 type Result<T> = result::Result<T, MintError>;
@@ -195,7 +199,7 @@ impl Mint {
   /// The wallet MUST store the `amount` in the request and the `quote` id in the response
   /// in its database so it can later request the tokens after paying the request.
   pub fn mint_quote(
-    &self,
+    &mut self,
     method: PaymentMethod,
     _amount: Amount,
     _unit: Unit,
@@ -214,16 +218,32 @@ impl Mint {
     // valid for 1h
     let expiry: i64 = Utc::now().timestamp() + 3600;
 
-    Ok(PostMintQuoteBolt11Response {
+    let mint_quote = PostMintQuoteBolt11Response {
       quote,
       request,
       paid,
       expiry,
-    })
+    };
+
+    let _ = self
+      .db
+      .write_to_mint_quotes_table(mint_quote.clone())
+      .map_err(|e| MintError::CouldNotCreateMintQuote(e.to_string()));
+
+    Ok(mint_quote)
   }
 
-  pub fn check_mint_paid(&self, _quote: String) -> Result<()> {
-    unimplemented!()
+  pub fn check_mint_paid(&self, quote_id: String) -> Result<PostMintQuoteBolt11Response> {
+    match self.db.get_mint_quote(quote_id) {
+      Ok(res) => {
+        if res.is_none() {
+          return Err(MintError::MintQuoteNotFound("".to_string()));
+        }
+
+        Ok(res.unwrap())
+      }
+      Err(e) => Err(MintError::MintQuoteNotFound(e.to_string())),
+    }
   }
 
   // Signs blinded message (an output)
@@ -609,7 +629,7 @@ mod tests {
 
   #[test]
   fn mint_quote() {
-    let sut = Sut::new("mint_quote");
+    let mut sut = Sut::new("mint_quote");
     let amount = 1;
     let unit = Unit::SAT;
     let expected_expiry = Utc::now().timestamp() + 3600;
@@ -622,15 +642,39 @@ mod tests {
 
     // valid payment method
     let payment_method = PaymentMethod::BOLT11;
-    let res_ok = sut.mint.mint_quote(payment_method, amount, unit.clone()).unwrap();
+    let res_ok = sut
+      .mint
+      .mint_quote(payment_method, amount, unit.clone())
+      .unwrap();
     assert_eq!(res_ok.paid, expected_response.paid);
     assert_eq!(res_ok.expiry, expected_response.expiry);
     assert!(res_ok.request.starts_with("ln"));
-    
+
     // invalid payment method
     let payment_method = PaymentMethod::OTHER;
     let res_ok = sut.mint.mint_quote(payment_method, amount, unit);
     assert!(res_ok.is_err_and(|x| x == MintError::PaymentMethodNotSupported));
+  }
+
+  #[test]
+  fn check_mint_paid() {
+    let mut sut = Sut::new("check_mint_paid");
+    let invalid_quote_id = "invalidquoteid".to_string();
+
+    // check invalid quote
+    let res_ok = sut.mint.check_mint_paid(invalid_quote_id);
+    assert!(res_ok.is_err_and(|x| matches!(x, MintError::MintQuoteNotFound(_))));
+
+    // mint quote
+    let method = PaymentMethod::BOLT11;
+    let amount: Amount = 1;
+    let unit = Unit::SAT;
+    let mint_quote = sut.mint.mint_quote(method, amount, unit).unwrap();
+
+    // check valid quote_id
+    let res_ok = sut.mint.check_mint_paid(mint_quote.clone().quote).unwrap();
+    assert_eq!(res_ok.quote, mint_quote.quote);
+    assert!(!res_ok.paid);
   }
 
   #[test]

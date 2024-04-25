@@ -156,7 +156,7 @@ impl Wallet {
     amount: Amount,
     unit: Unit,
   ) -> Result<PostMintQuoteBolt11Response> {
-    let mint = Mint::new();
+    let mut mint = Mint::new();
 
     match mint.mint_quote(method, amount, unit) {
       Ok(mint_quote) => Ok(mint_quote),
