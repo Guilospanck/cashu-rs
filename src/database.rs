@@ -454,18 +454,21 @@ mod tests {
         quote: "f3091ac2-3ba7-442e-a330-2d12bf5d3a95".to_string(),
         paid: false,
         request: "ln1230940something".to_string(),
+        amount: 1,
       };
       let quote2 = PostMintQuoteBolt11Response {
         expiry: 1814038710,
         quote: "e3091ac2-3ba7-442e-a330-2d12bf5d3a95".to_string(),
         paid: true,
         request: "ln2230940something".to_string(),
+        amount: 2,
       };
       let quote3 = PostMintQuoteBolt11Response {
         expiry: 1914038710,
         quote: "d3091ac2-3ba7-442e-a330-2d12bf5d3a95".to_string(),
         paid: false,
         request: "ln3230940something".to_string(),
+        amount: 4,
       };
 
       [quote1, quote2, quote3].to_vec()

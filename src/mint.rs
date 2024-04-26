@@ -13,7 +13,10 @@ use crate::{
   database::{CashuDatabase, DBType},
   helpers::hash_to_curve,
   keyset::{generate_keyset_and_keypairs, Keyset, KeysetWithKeys, Keysets},
-  rest::{GetKeysResponse, GetKeysetsResponse, PostMintQuoteBolt11Response},
+  rest::{
+    GetKeysResponse, GetKeysetsResponse, PostMintBolt11Request, PostMintBolt11Response,
+    PostMintQuoteBolt11Response,
+  },
   types::{
     Amount, BlindSignature, BlindSignatures, BlindedMessage, BlindedMessages, Keypairs,
     PaymentMethod, Proof, Proofs, Unit,
@@ -37,6 +40,8 @@ pub enum MintError {
   CouldNotCreateMintQuote(String),
   #[error("Mint quote not found: `{0}`")]
   MintQuoteNotFound(String),
+  #[error("Mint quote not paid")]
+  MintQuoteNotPaid,
 }
 
 type Result<T> = result::Result<T, MintError>;
@@ -201,7 +206,7 @@ impl Mint {
   pub fn mint_quote(
     &mut self,
     method: PaymentMethod,
-    _amount: Amount,
+    amount: Amount,
     _unit: Unit,
   ) -> Result<PostMintQuoteBolt11Response> {
     if method != PaymentMethod::BOLT11 {
@@ -218,12 +223,7 @@ impl Mint {
     // valid for 1h
     let expiry: i64 = Utc::now().timestamp() + 3600;
 
-    let mint_quote = PostMintQuoteBolt11Response {
-      quote,
-      request,
-      paid,
-      expiry,
-    };
+    let mint_quote = PostMintQuoteBolt11Response::new(quote, request, paid, expiry, amount);
 
     let _ = self
       .db
@@ -246,8 +246,45 @@ impl Mint {
     }
   }
 
+  pub fn mint(
+    &self,
+    method: PaymentMethod,
+    PostMintBolt11Request { quote_id, outputs }: PostMintBolt11Request,
+  ) -> Result<PostMintBolt11Response> {
+    let mint_quote = self.check_mint_paid(quote_id)?;
+
+    // check if mint_quote is paid
+    if !mint_quote.paid {
+      return Err(MintError::MintQuoteNotPaid);
+    }
+
+    // check if method is allowed
+    if method != PaymentMethod::BOLT11 {
+      return Err(MintError::PaymentMethodNotSupported);
+    }
+
+    // check if blinded messages amounts equal to amounts in the mint_quote from quote_id
+    let outputs_amount = outputs
+      .iter()
+      .map(|output| output.amount)
+      .reduce(|acc, e| acc + e)
+      .unwrap();
+
+    if mint_quote.amount != outputs_amount {
+      return Err(MintError::AmountsDoNotMatch);
+    }
+
+    let mut signatures: BlindSignatures = vec![];
+    for output in outputs {
+      let signature = self.mint_token(output)?;
+      signatures.push(signature);
+    }
+
+    Ok(PostMintBolt11Response { signatures })
+  }
+
   // Signs blinded message (an output)
-  pub fn mint_token(&self, message: BlindedMessage) -> Result<BlindSignature> {
+  fn mint_token(&self, message: BlindedMessage) -> Result<BlindSignature> {
     let BlindedMessage { b, id, amount } = message;
 
     let secretkey = match self.get_secret_key_from_keyset_id_and_amount(id.clone(), amount) {
@@ -566,6 +603,37 @@ mod tests {
       blinded_signatures
     }
 
+    fn gen_mint_quotes() -> Vec<PostMintQuoteBolt11Response> {
+      // Generate a valid paid quote
+      let quote1 = PostMintQuoteBolt11Response {
+        expiry: 1714038710,
+        quote: "f3091ac2-3ba7-442e-a330-2d12bf5d3a95".to_string(),
+        paid: true,
+        request: "ln1230940something".to_string(),
+        amount: 7,
+      };
+
+      // Generate a valid unpaid quote
+      let quote2 = PostMintQuoteBolt11Response {
+        expiry: 1814038710,
+        quote: "e3091ac2-3ba7-442e-a330-2d12bf5d3a95".to_string(),
+        paid: false,
+        request: "ln2230940something".to_string(),
+        amount: 7,
+      };
+
+      // Generate an unvalid quote (amounts don't match)
+      let quote3 = PostMintQuoteBolt11Response {
+        expiry: 1914038710,
+        quote: "d3091ac2-3ba7-442e-a330-2d12bf5d3a95".to_string(),
+        paid: true,
+        request: "ln3230940something".to_string(),
+        amount: 4,
+      };
+
+      [quote1, quote2, quote3].to_vec()
+    }
+
     fn remove_temp_db(&self) {
       fs::remove_file(format!("db/test/{}.redb", self.db_name)).unwrap();
     }
@@ -638,6 +706,7 @@ mod tests {
       paid: false,
       quote: "some-random-string".to_string(),
       request: "bolt11invoicerequest".to_string(),
+      amount: 1,
     };
 
     // valid payment method
@@ -675,6 +744,66 @@ mod tests {
     let res_ok = sut.mint.check_mint_paid(mint_quote.clone().quote).unwrap();
     assert_eq!(res_ok.quote, mint_quote.quote);
     assert!(!res_ok.paid);
+    assert_eq!(res_ok.expiry, mint_quote.expiry);
+  }
+
+  #[test]
+  fn mint() {
+    let mut sut = Sut::new("mint");
+    let valid_outputs = Sut::gen_blinded_messages();
+    let expected_signatures = Sut::gen_blind_signatures();
+    let method = PaymentMethod::BOLT11;
+    let invalid_method = PaymentMethod::OTHER;
+    let mint_quotes = Sut::gen_mint_quotes();
+
+    for mint_quote in mint_quotes.clone() {
+      sut.mint.db.write_to_mint_quotes_table(mint_quote).unwrap();
+    }
+
+    let res_ok = sut
+      .mint
+      .mint(
+        method.clone(),
+        PostMintBolt11Request {
+          quote_id: mint_quotes[0].quote.clone(),
+          outputs: valid_outputs.clone(),
+        },
+      )
+      .unwrap();
+    assert_eq!(res_ok.signatures, expected_signatures);
+
+    let res_ok = sut
+      .mint
+      .mint(
+        method.clone(),
+        PostMintBolt11Request {
+          quote_id: mint_quotes[1].quote.clone(),
+          outputs: valid_outputs.clone(),
+        },
+      );
+    assert!(res_ok.is_err_and(|x| x == MintError::MintQuoteNotPaid));
+
+    let res_ok = sut
+      .mint
+      .mint(
+        method,
+        PostMintBolt11Request {
+          quote_id: mint_quotes[2].quote.clone(),
+          outputs: valid_outputs.clone(),
+        },
+      );
+    assert!(res_ok.is_err_and(|x| x == MintError::AmountsDoNotMatch));
+
+    let res_ok = sut
+      .mint
+      .mint(
+        invalid_method,
+        PostMintBolt11Request {
+          quote_id: mint_quotes[0].quote.clone(),
+          outputs: valid_outputs,
+        },
+      );
+    assert!(res_ok.is_err_and(|x| x == MintError::PaymentMethodNotSupported));
   }
 
   #[test]
