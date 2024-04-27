@@ -8,7 +8,7 @@ use crate::{
   helpers::sha256_hasher,
   keyset::KeysetWithKeys,
   rest::PostMintQuoteBolt11Response,
-  types::{Keypair, Keypairs, Proof, Proofs, Token, Tokens},
+  types::{Amount, Keypair, Keypairs, Proof, Proofs, Token, Tokens},
 };
 
 /// [`Database`] error
@@ -94,6 +94,9 @@ impl CashuDatabase {
   // mint_url, proofs
   const PROOFS_TABLE: TableDefinition<'static, &'static str, &'static str> =
     TableDefinition::new("proofs");
+  // quote_id, amount
+  const WALLET_QUOTES_TABLE: TableDefinition<'static, &'static str, &'static str> =
+    TableDefinition::new("wallet_quotes");
 
   pub fn new(db_type: DBType) -> Result<Self> {
     CashuDatabase::initialise_db(db_type)
@@ -284,6 +287,23 @@ impl CashuDatabase {
     Ok(mint_quotes)
   }
 
+  // TODO: create unit test and create the method to write to wallet quotes table
+  pub fn get_all_wallet_quotes(&self) -> Result<Vec<(String, Amount)>> {
+    let mut wallet_quotes: Vec<(String, Amount)> = vec![];
+    let read_txn = self.db.begin_read()?;
+    let table = read_txn.open_table(Self::WALLET_QUOTES_TABLE)?;
+
+    table.iter().unwrap().for_each(|db_wallet_quote| {
+      let evt = db_wallet_quote.unwrap();
+      let quote_id = evt.0.value().to_string();
+      let quote_amount: Amount = evt.1.value().parse().unwrap();
+
+      wallet_quotes.push((quote_id, quote_amount));
+    });
+
+    Ok(wallet_quotes)
+  }
+
   fn begin_write(&self) -> Result<WriteTransaction> {
     Ok(self.db.begin_write()?)
   }
@@ -319,6 +339,7 @@ impl CashuDatabase {
 
     let write_txn = db.begin_write()?;
     write_txn.open_table(Self::PROOFS_TABLE)?; // this basically just creates the table if doesn't exist
+    write_txn.open_table(Self::WALLET_QUOTES_TABLE)?; // this basically just creates the table if doesn't exist
     write_txn.commit()?;
 
     Ok(Self { db })
@@ -334,6 +355,7 @@ impl CashuDatabase {
     write_txn.open_table(Self::PROOFS_TABLE)?; // this basically just creates the table if doesn't exist
     write_txn.open_table(Self::INVALID_INPUTS_TABLE)?; // this basically just creates the table if doesn't exist
     write_txn.open_table(Self::MINT_QUOTES_TABLE)?; // this basically just creates the table if doesn't exist
+    write_txn.open_table(Self::WALLET_QUOTES_TABLE)?; // this basically just creates the table if doesn't exist
     write_txn.commit()?;
 
     Ok(Self { db })
