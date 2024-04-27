@@ -33,6 +33,8 @@ pub enum WalletError {
   CouldNotVerifyToken(String),
   #[error("Could not mint quote: `{0}`")]
   CouldNotMintQuote(String),
+  #[error("Could not check mint quote: `{0}`")]
+  CouldNotCheckMintQuote(String),
 }
 
 type Result<T> = result::Result<T, WalletError>;
@@ -40,6 +42,7 @@ type Result<T> = result::Result<T, WalletError>;
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Wallet {
   tokens: Tokens,
+  quotes: Vec<(String, Amount)>,
   url: String,
 }
 
@@ -53,8 +56,61 @@ impl Wallet {
   pub fn new() -> Self {
     let wallet_db = CashuDatabase::new(DBType::WALLET).unwrap();
     let tokens = wallet_db.get_all_tokens().unwrap();
+    let quotes = wallet_db.get_all_wallet_quotes().unwrap();
     let url = "http://my_mint_url.cashu".to_string();
-    Self { tokens, url }
+    Self {
+      tokens,
+      quotes,
+      url,
+    }
+  }
+
+  pub fn mint_paid_quote(&self, quote_id: String) -> Result<()> {
+    let mut mint = Mint::new();
+
+    // Get r, the blinding factor. r \in [0, (p-1)/2) <- part of the curve
+    let (blinding_factor, _) = generate_key_pair();
+
+    // Get all proofs from this mint
+    let proofs = self.get_proofs_from_mint(self.url);
+
+    // get amount for this quote_id
+    let amount = match self.quotes.iter().find(|(id, _)| *id == quote_id) {
+      Some((_, amount)) => amount,
+      None => {
+        return Err(WalletError::CouldNotMintToken(
+          "Quote with this ID not found".to_string(),
+        ))
+      }
+    };
+
+    // If we don't have any proofs, usually it means that we are
+    // connecting to this mint for the first time.
+    if proofs.is_empty() {
+      // Picks secret x (utf-8 encoded 32 bytes encoded string) -- coin ID
+      let (x, _) = generate_key_pair();
+      let x = x.secret_bytes();
+
+      // TODO: unimplemented
+    }
+
+    let method = PaymentMethod::BOLT11;
+    let mut outputs: BlindedMessages = vec![];
+    // TODO: select which proofs we want
+    for proof in &proofs {
+      let x_vec = hex::decode(proof.secret.clone()).unwrap();
+      // TODO: here it looks like we can change the amount, so we request different specific amounts (but maintaining the
+      // TODO: same total amount)
+      let blinded_message = match self.blind(x_vec, blinding_factor, proof.amount, proof.id.clone())
+      {
+        Ok(value) => value,
+        Err(e) => return Err(WalletError::BlindError(e.to_string())),
+      };
+
+      outputs.push(blinded_message);
+    }
+
+    mint.mint(method, post_mint_bolt11_request)
   }
 
   // TODO: Wallets SHOULD store keysets the first time they encounter them along with the URL of the mint they are from.
@@ -164,6 +220,7 @@ impl Wallet {
     }
   }
 
+  // Computes `B_ = Y + rG`, with r being a random blinding factor (blinding)
   fn blind(
     &self,
     x: Vec<u8>,
@@ -223,6 +280,13 @@ impl Wallet {
         "[combine_negate|unblind] {}",
         e
       ))),
+    }
+  }
+
+  fn get_proofs_from_mint(&self, mint_url: String) -> Proofs {
+    match self.tokens.iter().find(|token| token.mint == mint_url) {
+      Some(token) => token.proofs,
+      None => vec![],
     }
   }
 }
