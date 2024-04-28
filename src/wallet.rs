@@ -85,6 +85,20 @@ impl Wallet {
       }
     };
 
+    // Get all keysets
+    let mint_keysets = mint.get_v1_keys();
+    let sat_keyset = mint_keysets
+      .keysets
+      .iter()
+      .find(|keyset| keyset.unit == Unit::SAT)
+      .unwrap();
+    
+    // TODO: check if the amount we have is allowed for the mint and, if not,
+    // TODO: check if can be divisible (by 2).
+    // Example: if we want 63 sats and the mint only allows 1, 2, 4, 8, 16, it could be
+    // done with 3*16 (48) + 1*8 (8) + 1*4 (4) + 1*2 (2) + 1*1 (1) = 63
+    let mint_sat_keys = &sat_keyset.keys;
+
     let method = PaymentMethod::BOLT11;
     let mut outputs: BlindedMessages = vec![];
 
@@ -94,20 +108,6 @@ impl Wallet {
       // Picks secret x (utf-8 encoded 32 bytes encoded string) -- coin ID
       let (x, _) = generate_key_pair();
       let x_vec = x.secret_bytes();
-
-      // Get all keysets
-      let mint_keysets = mint.get_v1_keys();
-      let sat_keyset = mint_keysets
-        .keysets
-        .iter()
-        .find(|keyset| keyset.unit == Unit::SAT)
-        .unwrap();
-      
-      // TODO: check if the amount we have is allowed for the mint and, if not,
-      // TODO: check if can be divisible (by 2).
-      // Example: if we want 63 sats and the mint only allows 1, 2, 4, 8, 16, it could be
-      // done with 3*16 (48) + 1*8 (8) + 1*4 (4) + 1*2 (2) + 1*1 (1) = 63
-      let _mint_sat_keys = &sat_keyset.keys;
 
 
       // TODO: here it looks like we can change the amount, so we request different specific amounts (but maintaining the
@@ -137,8 +137,35 @@ impl Wallet {
 
     let post_mint_bolt11_request = PostMintBolt11Request { quote_id, outputs };
 
-    let _response = mint.mint(method, post_mint_bolt11_request);
-    // TODO: what to do with response?
+    let blind_signatures = match mint.mint(method, post_mint_bolt11_request) {
+      Ok(response) => response.signatures,
+      Err(err) => return Err(WalletError::CouldNotMintToken(err.to_string()))
+    };
+    
+    // Upon receiving the BlindSignatures from the mint Bob, the wallet of Alice unblinds them to generate Proofs
+    // The wallet then stores these Proofs in its database.
+    let mut new_proofs: Proofs = vec![];
+    for (idx, blind_signature) in blind_signatures.iter().enumerate() {
+      // get mint pubkey for this amount
+      let pubkey = mint_sat_keys.get(&blind_signature.amount).unwrap();
+
+      // Unblinds signature
+      let c = match self.unblind(*pubkey, blind_signature.clone(), blinding_factor) {
+        Ok(value) => value,
+        Err(e) => return Err(WalletError::UnblindError(e.to_string())),
+      };
+
+      let proof = Proof {
+        c,
+        amount: blind_signature.amount,
+        id: blind_signature.id.clone(),
+        secret: proofs.clone()[idx].secret.clone(), // TODO: not sure
+      };
+
+      new_proofs.push(proof)
+    }
+
+    // TODO: save proofs in database
 
     Ok(())
   }
@@ -215,17 +242,8 @@ impl Wallet {
 
       new_proofs.push(proof)
     }
-
-    // // Alice can take the pair (x, C) as a token and can send it to Carol.
-    // let token = (x, c);
-
-    // // verification
-    // let is_verified = match mint.verification(token.0.to_vec(), token.1) {
-    //   Ok(value) => value,
-    //   Err(e) => return Err(WalletError::CouldNotVerifyToken(e.to_string())),
-    // };
-
-    // println!("{}", is_verified);
+    
+    // TODO: save proofs in database
     Ok(())
   }
 
