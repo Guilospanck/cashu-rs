@@ -6,7 +6,7 @@ use crate::{
   database::{CashuDatabase, DBType},
   helpers::{generate_key_pair, hash_to_curve},
   mint::Mint,
-  rest::PostMintQuoteBolt11Response,
+  rest::{PostMintBolt11Request, PostMintQuoteBolt11Response},
   types::{
     Amount, BlindSignature, BlindSignatures, BlindedMessage, BlindedMessages, PaymentMethod, Proof,
     Proofs, Token, Tokens, Unit,
@@ -66,15 +66,16 @@ impl Wallet {
   }
 
   pub fn mint_paid_quote(&self, quote_id: String) -> Result<()> {
-    let mut mint = Mint::new();
+    let mint = Mint::new();
 
     // Get r, the blinding factor. r \in [0, (p-1)/2) <- part of the curve
     let (blinding_factor, _) = generate_key_pair();
 
     // Get all proofs from this mint
-    let proofs = self.get_proofs_from_mint(self.url);
+    let proofs = self.get_proofs_from_mint(self.url.clone());
 
     // get amount for this quote_id
+    // TODO: use amount to calculate/get the proofs
     let amount = match self.quotes.iter().find(|(id, _)| *id == quote_id) {
       Some((_, amount)) => amount,
       None => {
@@ -84,33 +85,62 @@ impl Wallet {
       }
     };
 
+    let method = PaymentMethod::BOLT11;
+    let mut outputs: BlindedMessages = vec![];
+
     // If we don't have any proofs, usually it means that we are
     // connecting to this mint for the first time.
     if proofs.is_empty() {
       // Picks secret x (utf-8 encoded 32 bytes encoded string) -- coin ID
       let (x, _) = generate_key_pair();
-      let x = x.secret_bytes();
+      let x_vec = x.secret_bytes();
 
-      // TODO: unimplemented
-    }
+      // Get all keysets
+      let mint_keysets = mint.get_v1_keys();
+      let sat_keyset = mint_keysets
+        .keysets
+        .iter()
+        .find(|keyset| keyset.unit == Unit::SAT)
+        .unwrap();
+      
+      // TODO: check if the amount we have is allowed for the mint and, if not,
+      // TODO: check if can be divisible (by 2).
+      // Example: if we want 63 sats and the mint only allows 1, 2, 4, 8, 16, it could be
+      // done with 3*16 (48) + 1*8 (8) + 1*4 (4) + 1*2 (2) + 1*1 (1) = 63
+      let _mint_sat_keys = &sat_keyset.keys;
 
-    let method = PaymentMethod::BOLT11;
-    let mut outputs: BlindedMessages = vec![];
-    // TODO: select which proofs we want
-    for proof in &proofs {
-      let x_vec = hex::decode(proof.secret.clone()).unwrap();
+
       // TODO: here it looks like we can change the amount, so we request different specific amounts (but maintaining the
       // TODO: same total amount)
-      let blinded_message = match self.blind(x_vec, blinding_factor, proof.amount, proof.id.clone())
+      let blinded_message = match self.blind(x_vec.to_vec(), blinding_factor, *amount, sat_keyset.id.clone())
       {
         Ok(value) => value,
         Err(e) => return Err(WalletError::BlindError(e.to_string())),
       };
 
       outputs.push(blinded_message);
+    } else {
+      // TODO: select which proofs we want
+      for proof in &proofs {
+        let x_vec = hex::decode(proof.secret.clone()).unwrap();
+        // TODO: here it looks like we can change the amount, so we request different specific amounts (but maintaining the
+        // TODO: same total amount)
+        let blinded_message =
+          match self.blind(x_vec, blinding_factor, proof.amount, proof.id.clone()) {
+            Ok(value) => value,
+            Err(e) => return Err(WalletError::BlindError(e.to_string())),
+          };
+
+        outputs.push(blinded_message);
+      }
     }
 
-    mint.mint(method, post_mint_bolt11_request)
+    let post_mint_bolt11_request = PostMintBolt11Request { quote_id, outputs };
+
+    let _response = mint.mint(method, post_mint_bolt11_request);
+    // TODO: what to do with response?
+
+    Ok(())
   }
 
   // TODO: Wallets SHOULD store keysets the first time they encounter them along with the URL of the mint they are from.
@@ -140,11 +170,6 @@ impl Wallet {
     if let Some(token) = tokens_from_mint {
       proofs = token.proofs.clone();
     }
-
-    // TODO: this used in minting tokens
-    // // Picks secret x (utf-8 encoded 32 bytes encoded string) -- coin ID
-    // let (x, _) = generate_key_pair();
-    // let x = x.secret_bytes();
 
     // Get r, the blinding factor. r \in [0, (p-1)/2) <- part of the curve
     let (blinding_factor, _) = generate_key_pair();
@@ -285,7 +310,7 @@ impl Wallet {
 
   fn get_proofs_from_mint(&self, mint_url: String) -> Proofs {
     match self.tokens.iter().find(|token| token.mint == mint_url) {
-      Some(token) => token.proofs,
+      Some(token) => token.proofs.clone(),
       None => vec![],
     }
   }
