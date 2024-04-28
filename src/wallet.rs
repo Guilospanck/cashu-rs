@@ -1,15 +1,14 @@
 use std::result;
 
-use serde::{Deserialize, Serialize};
-
 use crate::{
   database::{CashuDatabase, DBType},
   helpers::{generate_key_pair, hash_to_curve},
+  keyset::KeysetWithKeys,
   mint::Mint,
   rest::{PostMintBolt11Request, PostMintQuoteBolt11Response},
   types::{
     Amount, BlindSignature, BlindSignatures, BlindedMessage, BlindedMessages, PaymentMethod, Proof,
-    Proofs, Token, Tokens, Unit,
+    Proofs, Unit,
   },
 };
 
@@ -39,40 +38,57 @@ pub enum WalletError {
 
 type Result<T> = result::Result<T, WalletError>;
 
-#[derive(Debug, Serialize, Deserialize)]
 pub struct Wallet {
-  tokens: Tokens,
+  valid_proofs: Proofs,
+  invalid_proofs: Proofs,
   quotes: Vec<(String, Amount)>,
   url: String,
+  mint: Mint,
+  mint_keysets: Vec<KeysetWithKeys>,
 }
 
-// TODO: Wallets can request the list of keyset IDs from the mint upon startup
-// TODO  and load only tokens from its database that have a keyset ID supported
-// TODO  by the mint it interacts with. This also helps wallets to determine
-// TODO  whether the mint has rotated to a new current keyset (i.e. added new
-// TODO  active keysets and inactivated old ones) and whether the wallet should
-// TODO  recycle all tokens from inactive keysets to currently active ones.
 impl Wallet {
   pub fn new() -> Self {
     let wallet_db = CashuDatabase::new(DBType::WALLET).unwrap();
-    let tokens = wallet_db.get_all_tokens().unwrap();
+    let mint = Mint::new();
+    let mint_url = "http://my_mint_url.cashu".to_string();
+
+    // Get all (active) keysets from mint
+    let mint_keysets = mint.get_v1_keys().keysets;
+    let mint_keyset_ids = mint_keysets
+      .iter()
+      .map(|keyset| keyset.id.clone())
+      .collect::<Vec<String>>();
+    let all_proofs_from_mint = wallet_db
+      .get_all_proofs_from_mint(mint_url.clone())
+      .unwrap();
+
+    let mut proofs_with_valid_keyset_ids: Proofs = vec![];
+    // This invalid proofs can be used to request swap of tokens (so we update their keyset_id)
+    let mut proofs_with_invalid_keyset_ids: Proofs = vec![];
+
+    for proof in all_proofs_from_mint {
+      if mint_keyset_ids.contains(&proof.id) {
+        proofs_with_valid_keyset_ids.push(proof);
+      } else {
+        proofs_with_invalid_keyset_ids.push(proof);
+      }
+    }
+
     let quotes = wallet_db.get_all_wallet_quotes().unwrap();
-    let url = "http://my_mint_url.cashu".to_string();
     Self {
-      tokens,
+      valid_proofs: proofs_with_valid_keyset_ids,
+      invalid_proofs: proofs_with_invalid_keyset_ids,
       quotes,
-      url,
+      url: mint_url,
+      mint,
+      mint_keysets,
     }
   }
 
   pub fn mint_paid_quote(&self, quote_id: String) -> Result<()> {
-    let mint = Mint::new();
-
     // Get r, the blinding factor. r \in [0, (p-1)/2) <- part of the curve
     let (blinding_factor, _) = generate_key_pair();
-
-    // Get all proofs from this mint
-    let proofs = self.get_proofs_from_mint(self.url.clone());
 
     // get amount for this quote_id
     // TODO: use amount to calculate/get the proofs
@@ -85,14 +101,12 @@ impl Wallet {
       }
     };
 
-    // Get all keysets
-    let mint_keysets = mint.get_v1_keys();
-    let sat_keyset = mint_keysets
-      .keysets
+    let sat_keyset = self
+      .mint_keysets
       .iter()
       .find(|keyset| keyset.unit == Unit::SAT)
       .unwrap();
-    
+
     // TODO: check if the amount we have is allowed for the mint and, if not,
     // TODO: check if can be divisible (by 2).
     // Example: if we want 63 sats and the mint only allows 1, 2, 4, 8, 16, it could be
@@ -104,16 +118,19 @@ impl Wallet {
 
     // If we don't have any proofs, usually it means that we are
     // connecting to this mint for the first time.
-    if proofs.is_empty() {
+    if self.valid_proofs.is_empty() {
       // Picks secret x (utf-8 encoded 32 bytes encoded string) -- coin ID
       let (x, _) = generate_key_pair();
       let x_vec = x.secret_bytes();
 
-
       // TODO: here it looks like we can change the amount, so we request different specific amounts (but maintaining the
       // TODO: same total amount)
-      let blinded_message = match self.blind(x_vec.to_vec(), blinding_factor, *amount, sat_keyset.id.clone())
-      {
+      let blinded_message = match self.blind(
+        x_vec.to_vec(),
+        blinding_factor,
+        *amount,
+        sat_keyset.id.clone(),
+      ) {
         Ok(value) => value,
         Err(e) => return Err(WalletError::BlindError(e.to_string())),
       };
@@ -121,7 +138,7 @@ impl Wallet {
       outputs.push(blinded_message);
     } else {
       // TODO: select which proofs we want
-      for proof in &proofs {
+      for proof in &self.valid_proofs {
         let x_vec = hex::decode(proof.secret.clone()).unwrap();
         // TODO: here it looks like we can change the amount, so we request different specific amounts (but maintaining the
         // TODO: same total amount)
@@ -137,11 +154,11 @@ impl Wallet {
 
     let post_mint_bolt11_request = PostMintBolt11Request { quote_id, outputs };
 
-    let blind_signatures = match mint.mint(method, post_mint_bolt11_request) {
+    let blind_signatures = match self.mint.mint(method, post_mint_bolt11_request) {
       Ok(response) => response.signatures,
-      Err(err) => return Err(WalletError::CouldNotMintToken(err.to_string()))
+      Err(err) => return Err(WalletError::CouldNotMintToken(err.to_string())),
     };
-    
+
     // Upon receiving the BlindSignatures from the mint Bob, the wallet of Alice unblinds them to generate Proofs
     // The wallet then stores these Proofs in its database.
     let mut new_proofs: Proofs = vec![];
@@ -159,7 +176,7 @@ impl Wallet {
         c,
         amount: blind_signature.amount,
         id: blind_signature.id.clone(),
-        secret: proofs.clone()[idx].secret.clone(), // TODO: not sure
+        secret: self.valid_proofs.clone()[idx].secret.clone(), // TODO: not sure
       };
 
       new_proofs.push(proof)
@@ -173,37 +190,25 @@ impl Wallet {
   // TODO: Wallets SHOULD store keysets the first time they encounter them along with the URL of the mint they are from.
   // TODO: Wallets SHOULD spend Proofs of inactive keysets first
   // TODO: When constructing outputs for an operation, wallets MUST choose only active keysets
-  pub fn swap_tokens(&self) -> Result<()> {
-    // Mint Bob publishes public key K = kG
-    let mut mint = Mint::new();
-
-    // Get all keysets
-    let mint_keysets = mint.get_v1_keys();
-    let sat_keyset = mint_keysets
-      .keysets
+  pub fn swap_tokens(&mut self) -> Result<()> {
+    let sat_keyset = self
+      .mint_keysets
       .iter()
       .find(|keyset| keyset.unit == Unit::SAT)
       .unwrap();
+
+    // TODO: check if the amount we have is allowed for the mint and, if not,
+    // TODO: check if can be divisible (by 2).
+    // Example: if we want 63 sats and the mint only allows 1, 2, 4, 8, 16, it could be
+    // done with 3*16 (48) + 1*8 (8) + 1*4 (4) + 1*2 (2) + 1*1 (1) = 63
     let mint_sat_keys = &sat_keyset.keys;
-
-    // Get all tokens (in wallet database) from this mint
-    let tokens_from_mint = self
-      .tokens
-      .iter()
-      .find(|Token { mint, .. }| *mint == self.url);
-
-    // Get all proofs from this mint
-    let mut proofs = vec![];
-    if let Some(token) = tokens_from_mint {
-      proofs = token.proofs.clone();
-    }
 
     // Get r, the blinding factor. r \in [0, (p-1)/2) <- part of the curve
     let (blinding_factor, _) = generate_key_pair();
 
     let mut outputs: BlindedMessages = vec![];
     // TODO: select which proofs we want
-    for proof in &proofs {
+    for proof in &self.valid_proofs {
       let x_vec = hex::decode(proof.secret.clone()).unwrap();
       // Computes `B_ = Y + rG`, with r being a random blinding factor (blinding)
       // TODO: here it looks like we can change the amount, so we request different pocket change tokens from mint
@@ -217,10 +222,11 @@ impl Wallet {
     }
 
     // Swaps inputs for blind_signatures
-    let blind_signatures: BlindSignatures = match mint.swap_tokens(proofs.clone(), outputs) {
-      Ok(value) => value,
-      Err(e) => return Err(WalletError::CouldNotMintToken(e.to_string())),
-    };
+    let blind_signatures: BlindSignatures =
+      match self.mint.swap_tokens(self.valid_proofs.clone(), outputs) {
+        Ok(value) => value,
+        Err(e) => return Err(WalletError::CouldNotMintToken(e.to_string())),
+      };
 
     let mut new_proofs: Proofs = vec![];
     for (idx, blind_signature) in blind_signatures.iter().enumerate() {
@@ -237,12 +243,12 @@ impl Wallet {
         c,
         amount: blind_signature.amount,
         id: blind_signature.id.clone(),
-        secret: proofs.clone()[idx].secret.clone(), // TODO: not sure
+        secret: self.valid_proofs.clone()[idx].secret.clone(), // TODO: not sure
       };
 
       new_proofs.push(proof)
     }
-    
+
     // TODO: save proofs in database
     Ok(())
   }
@@ -323,13 +329,6 @@ impl Wallet {
         "[combine_negate|unblind] {}",
         e
       ))),
-    }
-  }
-
-  fn get_proofs_from_mint(&self, mint_url: String) -> Proofs {
-    match self.tokens.iter().find(|token| token.mint == mint_url) {
-      Some(token) => token.proofs.clone(),
-      None => vec![],
     }
   }
 }
