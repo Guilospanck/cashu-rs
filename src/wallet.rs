@@ -99,6 +99,7 @@ impl Wallet {
         ))
       }
     };
+    let amounts_in_powers_of_two = self.express_amount_in_binary_form(*amount);
 
     let sat_keyset = self
       .mint_keysets
@@ -106,41 +107,52 @@ impl Wallet {
       .find(|keyset| keyset.unit == Unit::SAT)
       .unwrap();
 
-    // TODO: check if the amount we have is allowed for the mint and, if not,
-    // TODO: check if can be divisible (by 2).
-    // Example: if we want 63 sats and the mint only allows 1, 2, 4, 8, 16, it could be
-    // done with 3*16 (48) + 1*8 (8) + 1*4 (4) + 1*2 (2) + 1*1 (1) = 63
     let mint_sat_keys = &sat_keyset.keys;
+
+    // Get proofs that have the amounts
+    let mut proofs_we_want: Proofs = vec![];
+    for amount_power_of_two in amounts_in_powers_of_two.clone() {
+      match self
+        .valid_proofs
+        .iter()
+        .find(|proof| proof.amount == amount_power_of_two)
+      {
+        Some(proof) => proofs_we_want.push(proof.clone()),
+        None => {
+          return Err(WalletError::CouldNotMintToken(
+            "Not enough proofs with the right amounts".to_string(),
+          ))
+        }
+      };
+    }
 
     let method = PaymentMethod::BOLT11;
     let mut outputs: BlindedMessages = vec![];
 
     // If we don't have any proofs, usually it means that we are
     // connecting to this mint for the first time.
-    if self.valid_proofs.is_empty() {
+    if proofs_we_want.is_empty() {
       // Picks secret x (utf-8 encoded 32 bytes encoded string) -- coin ID
       let (x, _) = generate_key_pair();
       let x_vec = x.secret_bytes();
 
-      // TODO: here it looks like we can change the amount, so we request different specific amounts (but maintaining the
-      // TODO: same total amount)
-      let blinded_message = match self.blind(
-        x_vec.to_vec(),
-        blinding_factor,
-        *amount,
-        sat_keyset.id.clone(),
-      ) {
-        Ok(value) => value,
-        Err(e) => return Err(WalletError::BlindError(e.to_string())),
-      };
+      for amount_power_of_two in amounts_in_powers_of_two {
+        let blinded_message = match self.blind(
+          x_vec.to_vec(),
+          blinding_factor,
+          amount_power_of_two,
+          sat_keyset.id.clone(),
+        ) {
+          Ok(value) => value,
+          Err(e) => return Err(WalletError::BlindError(e.to_string())),
+        };
 
-      outputs.push(blinded_message);
+        outputs.push(blinded_message);
+      }
     } else {
-      // TODO: select which proofs we want
-      for proof in &self.valid_proofs {
+      for proof in proofs_we_want {
         let x_vec = hex::decode(proof.secret.clone()).unwrap();
-        // TODO: here it looks like we can change the amount, so we request different specific amounts (but maintaining the
-        // TODO: same total amount)
+
         let blinded_message =
           match self.blind(x_vec, blinding_factor, proof.amount, proof.id.clone()) {
             Ok(value) => value,
@@ -331,7 +343,7 @@ impl Wallet {
     }
   }
 
-  fn express_amount_in_binary_form(amount: Amount) -> Vec<Amount> {
+  fn express_amount_in_binary_form(&self, amount: Amount) -> Vec<Amount> {
     let binary = format!("{:b}", amount);
 
     let base: u64 = 2;
