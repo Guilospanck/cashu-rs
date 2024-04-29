@@ -91,7 +91,6 @@ impl Wallet {
     let (blinding_factor, _) = generate_key_pair();
 
     // get amount for this quote_id
-    // TODO: use amount to calculate/get the proofs
     let amount = match self.quotes.iter().find(|(id, _)| *id == quote_id) {
       Some((_, amount)) => amount,
       None => {
@@ -330,5 +329,19 @@ impl Wallet {
         e
       ))),
     }
+  }
+
+  fn express_amount_in_binary_form(amount: Amount) -> Vec<Amount> {
+    let binary = format!("{:b}", amount);
+
+    let base: u64 = 2;
+    let mut amounts: Vec<Amount> = vec![];
+    for (idx, value) in binary.chars().rev().enumerate() {
+      if value == '1' {
+        amounts.push(base.pow(idx.try_into().unwrap()));
+      }
+    }
+
+    amounts
   }
 }
