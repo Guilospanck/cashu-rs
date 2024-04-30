@@ -27,7 +27,7 @@ pub struct PostMintQuoteBolt11Response {
   pub request: String,
   /// Whether the request has been paid
   pub paid: bool,
-  /// Unix timestamp (secondsa) until which the mint quote is valid
+  /// Unix timestamp (seconds) until which the mint quote is valid
   pub expiry: i64,
   /// the amount of the invoice
   pub amount: Amount,

@@ -68,7 +68,7 @@ pub type Keys = BTreeMap<Amount, PublicKey>;
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Keypair {
   pub pubkey: PublicKey,
-  pub secretkey: SecretKey
+  pub secretkey: SecretKey,
 }
 
 pub type Keypairs = Vec<Keypair>;
@@ -84,10 +84,10 @@ pub enum Unit {
 impl<'de> Deserialize<'de> for Unit {
   fn deserialize<D>(deserializer: D) -> Result<Unit, D::Error>
   where
-      D: Deserializer<'de>,
+    D: Deserializer<'de>,
   {
-      let s: String = Deserialize::deserialize(deserializer)?;
-      Unit::from_str(&s.to_lowercase()).map_err(serde::de::Error::custom)
+    let s: String = Deserialize::deserialize(deserializer)?;
+    Unit::from_str(&s.to_lowercase()).map_err(serde::de::Error::custom)
   }
 }
 
@@ -96,15 +96,15 @@ impl<'de> Deserialize<'de> for Unit {
 #[strum(serialize_all = "lowercase")]
 pub enum PaymentMethod {
   BOLT11,
-  OTHER
+  OTHER,
 }
 
 impl<'de> Deserialize<'de> for PaymentMethod {
   fn deserialize<D>(deserializer: D) -> Result<PaymentMethod, D::Error>
   where
-      D: Deserializer<'de>,
+    D: Deserializer<'de>,
   {
-      let s: String = Deserialize::deserialize(deserializer)?;
-      PaymentMethod::from_str(&s.to_lowercase()).map_err(serde::de::Error::custom)
+    let s: String = Deserialize::deserialize(deserializer)?;
+    PaymentMethod::from_str(&s.to_lowercase()).map_err(serde::de::Error::custom)
   }
 }

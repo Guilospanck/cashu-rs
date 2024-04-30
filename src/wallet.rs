@@ -87,9 +87,6 @@ impl Wallet {
   }
 
   pub fn mint_paid_quote(&self, quote_id: String) -> Result<()> {
-    // Get r, the blinding factor. r \in [0, (p-1)/2) <- part of the curve
-    let (blinding_factor, _) = generate_key_pair();
-
     // get amount for this quote_id
     let amount = match self.quotes.iter().find(|(id, _)| *id == quote_id) {
       Some((_, amount)) => amount,
@@ -109,58 +106,28 @@ impl Wallet {
 
     let mint_sat_keys = &sat_keyset.keys;
 
-    // Get proofs that have the amounts
-    let mut proofs_we_want: Proofs = vec![];
-    for amount_power_of_two in amounts_in_powers_of_two.clone() {
-      match self
-        .valid_proofs
-        .iter()
-        .find(|proof| proof.amount == amount_power_of_two)
-      {
-        Some(proof) => proofs_we_want.push(proof.clone()),
-        None => {
-          return Err(WalletError::CouldNotMintToken(
-            "Not enough proofs with the right amounts".to_string(),
-          ))
-        }
-      };
-    }
-
     let method = PaymentMethod::BOLT11;
     let mut outputs: BlindedMessages = vec![];
 
-    // If we don't have any proofs, usually it means that we are
-    // connecting to this mint for the first time.
-    if proofs_we_want.is_empty() {
-      // Picks secret x (utf-8 encoded 32 bytes encoded string) -- coin ID
-      let (x, _) = generate_key_pair();
-      let x_vec = x.secret_bytes();
+    // Picks secret x (utf-8 encoded 32 bytes encoded string) -- coin ID
+    let (x, _) = generate_key_pair();
+    let x_vec: [u8; 32] = x.secret_bytes();
 
-      for amount_power_of_two in amounts_in_powers_of_two {
-        let blinded_message = match self.blind(
-          x_vec.to_vec(),
-          blinding_factor,
-          amount_power_of_two,
-          sat_keyset.id.clone(),
-        ) {
-          Ok(value) => value,
-          Err(e) => return Err(WalletError::BlindError(e.to_string())),
-        };
+    // Get r, the blinding factor. r \in [0, (p-1)/2) <- part of the curve
+    let (blinding_factor, _) = generate_key_pair();
 
-        outputs.push(blinded_message);
-      }
-    } else {
-      for proof in proofs_we_want {
-        let x_vec = hex::decode(proof.secret.clone()).unwrap();
+    for amount_power_of_two in amounts_in_powers_of_two {
+      let blinded_message = match self.blind(
+        x_vec.to_vec(),
+        blinding_factor,
+        amount_power_of_two,
+        sat_keyset.id.clone(),
+      ) {
+        Ok(value) => value,
+        Err(e) => return Err(WalletError::BlindError(e.to_string())),
+      };
 
-        let blinded_message =
-          match self.blind(x_vec, blinding_factor, proof.amount, proof.id.clone()) {
-            Ok(value) => value,
-            Err(e) => return Err(WalletError::BlindError(e.to_string())),
-          };
-
-        outputs.push(blinded_message);
-      }
+      outputs.push(blinded_message);
     }
 
     let post_mint_bolt11_request = PostMintBolt11Request { quote_id, outputs };
@@ -173,7 +140,7 @@ impl Wallet {
     // Upon receiving the BlindSignatures from the mint Bob, the wallet of Alice unblinds them to generate Proofs
     // The wallet then stores these Proofs in its database.
     let mut new_proofs: Proofs = vec![];
-    for (idx, blind_signature) in blind_signatures.iter().enumerate() {
+    for blind_signature in blind_signatures.iter() {
       // get mint pubkey for this amount
       let pubkey = mint_sat_keys.get(&blind_signature.amount).unwrap();
 
@@ -187,7 +154,7 @@ impl Wallet {
         c,
         amount: blind_signature.amount,
         id: blind_signature.id.clone(),
-        secret: self.valid_proofs.clone()[idx].secret.clone(), // TODO: not sure
+        secret: hex::encode(x_vec),
       };
 
       new_proofs.push(proof)
