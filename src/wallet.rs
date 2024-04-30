@@ -130,28 +130,12 @@ impl Wallet {
       Err(err) => return Err(WalletError::CouldNotMintToken(err.to_string())),
     };
 
-    // Upon receiving the BlindSignatures from the mint Bob, the wallet of Alice unblinds them to generate Proofs
-    // The wallet then stores these Proofs in its database.
-    let mut new_proofs: Proofs = vec![];
-    for blind_signature in blind_signatures.iter() {
-      // get mint pubkey for this amount
-      let pubkey = mint_sat_keys.get(&blind_signature.amount).unwrap();
-
-      // Unblinds signature
-      let c = match self.unblind(*pubkey, blind_signature.clone(), blinding_factor) {
-        Ok(value) => value,
-        Err(e) => return Err(WalletError::UnblindError(e.to_string())),
-      };
-
-      let proof = Proof {
-        c,
-        amount: blind_signature.amount,
-        id: blind_signature.id.clone(),
-        secret: hex::encode(x_vec),
-      };
-
-      new_proofs.push(proof)
-    }
+    let _new_proofs = self.build_proofs_from_promises(
+      blind_signatures,
+      mint_sat_keys,
+      blinding_factor,
+      x_vec.to_vec(),
+    );
 
     // TODO: save proofs in database
 
@@ -164,7 +148,7 @@ impl Wallet {
   pub fn swap_tokens(&mut self, amounts: Vec<Amount>) -> Result<()> {
     let amounts_sum = amounts.iter().sum();
 
-    let (_, sat_keyset, mint_sat_keys) =
+    let (amounts_in_binary_form, sat_keyset, mint_sat_keys) =
       self.get_mint_keys_and_divisible_amounts_from_amount(amounts_sum);
 
     // Picks secret x (utf-8 encoded 32 bytes encoded string) -- coin ID
@@ -191,13 +175,15 @@ impl Wallet {
     }
 
     // Get some inputs we're going to use
-    // TODO: get all the inputs that the total amount will
-    // match exactly what we need...
     let mut inputs: Proofs = vec![];
     let mut current_amount = 0;
     for proof in &self.valid_proofs {
-      inputs.push(proof.clone());
-      current_amount += proof.amount;
+      let amount_to_go = amounts_sum - current_amount;
+      if amounts_in_binary_form.contains(&proof.amount) && proof.amount <= amount_to_go {
+        inputs.push(proof.clone());
+        current_amount += proof.amount;
+      }
+
       // If I already have what I need, break
       if current_amount == amounts_sum {
         break;
@@ -205,32 +191,17 @@ impl Wallet {
     }
 
     // Swaps inputs for blind_signatures
-    let blind_signatures: BlindSignatures =
-      match self.mint.swap_tokens(inputs, outputs) {
-        Ok(value) => value,
-        Err(e) => return Err(WalletError::CouldNotMintToken(e.to_string())),
-      };
+    let blind_signatures: BlindSignatures = match self.mint.swap_tokens(inputs, outputs) {
+      Ok(value) => value,
+      Err(e) => return Err(WalletError::CouldNotMintToken(e.to_string())),
+    };
 
-    let mut new_proofs: Proofs = vec![];
-    for (idx, blind_signature) in blind_signatures.iter().enumerate() {
-      // get mint pubkey for this amount
-      let pubkey = mint_sat_keys.get(&blind_signature.amount).unwrap();
-
-      // Unblinds signature
-      let c = match self.unblind(*pubkey, blind_signature.clone(), blinding_factor) {
-        Ok(value) => value,
-        Err(e) => return Err(WalletError::UnblindError(e.to_string())),
-      };
-
-      let proof = Proof {
-        c,
-        amount: blind_signature.amount,
-        id: blind_signature.id.clone(),
-        secret: self.valid_proofs.clone()[idx].secret.clone(), // TODO: not sure
-      };
-
-      new_proofs.push(proof)
-    }
+    let _new_proofs = self.build_proofs_from_promises(
+      blind_signatures,
+      mint_sat_keys,
+      blinding_factor,
+      x_vec.to_vec(),
+    );
 
     // TODO: save proofs in database
     Ok(())
@@ -269,7 +240,44 @@ impl Wallet {
       .unwrap();
 
     let mint_sat_keys = &sat_keyset.keys;
-    (amounts_in_powers_of_two, sat_keyset.clone(), mint_sat_keys.clone())
+    (
+      amounts_in_powers_of_two,
+      sat_keyset.clone(),
+      mint_sat_keys.clone(),
+    )
+  }
+
+  fn build_proofs_from_promises(
+    &self,
+    blind_signatures: BlindSignatures,
+    mint_sat_keys: std::collections::BTreeMap<u64, PublicKey>,
+    blinding_factor: SecretKey,
+    x_vec: Vec<u8>,
+  ) -> Result<Proofs> {
+    // Upon receiving the BlindSignatures from the mint Bob, the wallet of Alice unblinds them to generate Proofs
+    // The wallet then stores these Proofs in its database.
+    let mut new_proofs: Proofs = vec![];
+    for blind_signature in blind_signatures.iter() {
+      // get mint pubkey for this amount
+      let pubkey = mint_sat_keys.get(&blind_signature.amount).unwrap();
+
+      // Unblinds signature
+      let c = match self.unblind(*pubkey, blind_signature.clone(), blinding_factor) {
+        Ok(value) => value,
+        Err(e) => return Err(WalletError::UnblindError(e.to_string())),
+      };
+
+      let proof = Proof {
+        c,
+        amount: blind_signature.amount,
+        id: blind_signature.id.clone(),
+        secret: hex::encode(x_vec.clone()),
+      };
+
+      new_proofs.push(proof)
+    }
+
+    Ok(new_proofs)
   }
 
   // Computes `B_ = Y + rG`, with r being a random blinding factor (blinding)
