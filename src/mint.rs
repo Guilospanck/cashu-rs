@@ -34,6 +34,8 @@ pub enum MintError {
   InvalidProof,
   #[error("Amounts don't match")]
   AmountsDoNotMatch,
+  #[error("Insufficient funds")]
+  InsufficientFunds,
   #[error("Payment method not supported")]
   PaymentMethodNotSupported,
   #[error("Could not create mint quote: `{0}`")]
@@ -160,8 +162,8 @@ impl Mint {
       .map(|proof| proof.amount)
       .reduce(|acc, e| acc + e)
       .unwrap();
-    if total_amount_inputs != total_amount_outputs {
-      return Err(MintError::AmountsDoNotMatch);
+    if total_amount_inputs < total_amount_outputs {
+      return Err(MintError::InsufficientFunds);
     }
 
     // verify inputs
@@ -676,11 +678,11 @@ mod tests {
     let mut not_valid_proofs = Sut::gen_proofs_not_created_from_this_mint();
     not_valid_proofs[1].amount = 2; // So we match the amounts
 
-    // amounts don't match
-    let res_amounts_dont_match = sut
+    // InsufficientFunds
+    let input_with_less_than_output = sut
       .mint
       .swap_tokens(valid_inputs.clone(), outputs_with_wrong_amount);
-    assert!(res_amounts_dont_match.is_err_and(|x| x == MintError::AmountsDoNotMatch));
+    assert!(input_with_less_than_output.is_err_and(|x| x == MintError::InsufficientFunds));
 
     // first time swapping tokens should work
     let res_ok = sut.mint.swap_tokens(valid_inputs.clone(), outputs.clone());

@@ -183,7 +183,7 @@ impl Wallet {
   pub fn swap_tokens(&mut self, amounts: Vec<Amount>) -> Result<()> {
     let amounts_sum = amounts.iter().sum();
 
-    let (amounts_in_binary_form, sat_keyset, mint_sat_keys) =
+    let (_, sat_keyset, mint_sat_keys) =
       self.get_mint_keys_and_divisible_amounts_from_amount(amounts_sum);
 
     // Picks secret x (utf-8 encoded 32 bytes encoded string) -- coin ID
@@ -210,7 +210,7 @@ impl Wallet {
     }
 
     // Get some inputs we're going to use
-    let inputs = self.get_inputs_from_specific_amounts(amounts_sum, amounts_in_binary_form);
+    let inputs = self.get_inputs_from_specific_amounts(amounts_sum);
 
     // Swaps inputs for blind_signatures
     let blind_signatures: BlindSignatures = match self.mint.swap_tokens(inputs, outputs) {
@@ -245,23 +245,19 @@ impl Wallet {
     }
   }
 
-  // TODO: see test. This does not work as expected
   fn get_inputs_from_specific_amounts(
     &self,
     amounts_sum: Amount,
-    amounts_in_binary_form: Vec<Amount>,
   ) -> Proofs {
     let mut inputs: Proofs = vec![];
     let mut current_amount = 0;
+
     for proof in &self.valid_proofs {
-      let amount_to_go = amounts_sum - current_amount;
-      if amounts_in_binary_form.contains(&proof.amount) && proof.amount <= amount_to_go {
-        inputs.push(proof.clone());
-        current_amount += proof.amount;
-      }
+      inputs.push(proof.clone());
+      current_amount += proof.amount;
 
       // If I already have what I need, break
-      if current_amount == amounts_sum {
+      if current_amount >= amounts_sum {
         break;
       }
     }
@@ -466,14 +462,14 @@ mod tests {
     let inputs_amounts: Vec<Amount> = vec![2, 8, 16, 32, 64]; // 122
     let inputs = Sut::gen_inputs_from_amount(inputs_amounts.clone());
     let sut = Sut::new("get_inputs_from_specific_amounts", inputs);
-    let required_amount_to_swap_sum: Amount = 63;
+    let required_amount_to_swap_sum: Amount = 63; // [1, 2, 4, 8, 16, 32]
 
     let response_inputs = sut
       .wallet
-      .get_inputs_from_specific_amounts(required_amount_to_swap_sum, inputs_amounts);
+      .get_inputs_from_specific_amounts(required_amount_to_swap_sum);
 
     let response_total_amounts: Amount = response_inputs.iter().map(|proof| proof.amount).sum();
 
-    assert_ne!(response_total_amounts, required_amount_to_swap_sum);
+    assert!(response_total_amounts >= required_amount_to_swap_sum);
   }
 }
