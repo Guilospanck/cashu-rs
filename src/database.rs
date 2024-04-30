@@ -78,13 +78,13 @@ pub struct CashuDatabase {
 impl CashuDatabase {
   /// MINT
   // keyset_id, KeysetWithKeys
-  const KEYSETS_TABLE: TableDefinition<'static, &'static str, &'static str> =
+  const MINT_KEYSETS_TABLE: TableDefinition<'static, &'static str, &'static str> =
     TableDefinition::new("keysets");
   // pubkey, seckey
-  const KEYPAIRS_TABLE: TableDefinition<'static, &'static str, &'static str> =
+  const MINT_KEYPAIRS_TABLE: TableDefinition<'static, &'static str, &'static str> =
     TableDefinition::new("keypairs");
   // date, proof
-  const INVALID_INPUTS_TABLE: TableDefinition<'static, &'static str, &'static str> =
+  const MINT_INVALID_INPUTS_TABLE: TableDefinition<'static, &'static str, &'static str> =
     TableDefinition::new("invalid_proofs");
   // quote_id, PostMintQuoteBolt11Response
   const MINT_QUOTES_TABLE: TableDefinition<'static, &'static str, &'static str> =
@@ -92,7 +92,7 @@ impl CashuDatabase {
 
   /// WALLET
   // mint_url, proofs
-  const PROOFS_TABLE: TableDefinition<'static, &'static str, &'static str> =
+  const WALLET_PROOFS_TABLE: TableDefinition<'static, &'static str, &'static str> =
     TableDefinition::new("proofs");
   // quote_id, amount
   const WALLET_QUOTES_TABLE: TableDefinition<'static, &'static str, &'static str> =
@@ -111,7 +111,7 @@ impl CashuDatabase {
     let seckey_serialized = v.display_secret().to_string();
     let write_txn = self.begin_write()?;
     {
-      let mut table = write_txn.open_table(Self::KEYPAIRS_TABLE)?;
+      let mut table = write_txn.open_table(Self::MINT_KEYPAIRS_TABLE)?;
       table.insert(pubkey_serialized.as_str(), seckey_serialized.as_str())?;
     }
     self.commit_txn(write_txn)?;
@@ -121,7 +121,7 @@ impl CashuDatabase {
   pub fn get_all_keypairs(&self) -> Result<Keypairs> {
     let mut keypairs: Keypairs = vec![];
     let read_txn = self.db.begin_read()?;
-    let table = read_txn.open_table(Self::KEYPAIRS_TABLE)?;
+    let table = read_txn.open_table(Self::MINT_KEYPAIRS_TABLE)?;
 
     table.iter().unwrap().for_each(|keypair| {
       let evt = keypair.unwrap();
@@ -143,7 +143,7 @@ impl CashuDatabase {
     let value_serialized = serde_json::to_string(&v)?;
     let write_txn = self.begin_write()?;
     {
-      let mut table = write_txn.open_table(Self::KEYSETS_TABLE)?;
+      let mut table = write_txn.open_table(Self::MINT_KEYSETS_TABLE)?;
       table.insert(k, value_serialized.as_str())?;
     }
     self.commit_txn(write_txn)?;
@@ -153,7 +153,7 @@ impl CashuDatabase {
   pub fn get_all_keysets(&self) -> Result<Vec<KeysetWithKeys>> {
     let mut keysets: Vec<KeysetWithKeys> = vec![];
     let read_txn = self.db.begin_read()?;
-    let table = read_txn.open_table(Self::KEYSETS_TABLE)?;
+    let table = read_txn.open_table(Self::MINT_KEYSETS_TABLE)?;
 
     table.iter().unwrap().for_each(|keyset| {
       let evt = keyset.unwrap();
@@ -165,10 +165,22 @@ impl CashuDatabase {
     Ok(keysets)
   }
 
+  // TODO: unit tests
+  pub fn write_to_wallet_proofs_table(&mut self, mint_url: &str, proofs: Proofs) -> Result<()> {
+    let proofs_serialized = serde_json::to_string(&proofs)?;
+    let write_txn = self.begin_write()?;
+    {
+      let mut table = write_txn.open_table(Self::WALLET_PROOFS_TABLE)?;
+      table.insert(mint_url, proofs_serialized.as_str())?;
+    }
+    self.commit_txn(write_txn)?;
+    Ok(())
+  }
+
   pub fn get_all_tokens(&self) -> Result<Tokens> {
     let mut tokens: Tokens = vec![];
     let read_txn = self.db.begin_read()?;
-    let table = read_txn.open_table(Self::PROOFS_TABLE)?;
+    let table = read_txn.open_table(Self::WALLET_PROOFS_TABLE)?;
 
     table.iter().unwrap().for_each(|keyset| {
       let evt = keyset.unwrap();
@@ -187,7 +199,7 @@ impl CashuDatabase {
   pub fn get_all_proofs_from_mint(&self, mint_url: String) -> Result<Proofs> {
     let mut proofs: Proofs = vec![];
     let read_txn = self.db.begin_read()?;
-    let table = read_txn.open_table(Self::PROOFS_TABLE)?;
+    let table = read_txn.open_table(Self::WALLET_PROOFS_TABLE)?;
 
     if let Ok(Some(mint_proofs)) = table.get(mint_url.as_str()) {
       let mint_proofs_deserialized: Proofs = serde_json::from_str(mint_proofs.value()).unwrap();
@@ -204,7 +216,7 @@ impl CashuDatabase {
 
     let write_txn = self.begin_write()?;
     {
-      let mut table = write_txn.open_table(Self::INVALID_INPUTS_TABLE)?;
+      let mut table = write_txn.open_table(Self::MINT_INVALID_INPUTS_TABLE)?;
       table.insert(key.as_str(), invalid_proof_serialized.as_str())?;
     }
     self.commit_txn(write_txn)?;
@@ -217,7 +229,7 @@ impl CashuDatabase {
     let key = hex::encode(key);
 
     let read_txn = self.db.begin_read()?;
-    let table = read_txn.open_table(Self::INVALID_INPUTS_TABLE)?;
+    let table = read_txn.open_table(Self::MINT_INVALID_INPUTS_TABLE)?;
 
     let response = table.get(key.as_str()).unwrap().map(|proof| {
       let proof_deserialized: Proof = serde_json::from_str(proof.value()).unwrap();
@@ -230,7 +242,7 @@ impl CashuDatabase {
   pub fn get_all_invalid_inputs(&self) -> Result<Proofs> {
     let mut proofs: Proofs = vec![];
     let read_txn = self.db.begin_read()?;
-    let table = read_txn.open_table(Self::INVALID_INPUTS_TABLE)?;
+    let table = read_txn.open_table(Self::MINT_INVALID_INPUTS_TABLE)?;
 
     table.iter().unwrap().for_each(|proof| {
       let evt = proof.unwrap();
@@ -325,9 +337,9 @@ impl CashuDatabase {
     let db = Database::create(format!("db/{}.redb", db_name))?;
 
     let write_txn = db.begin_write()?;
-    write_txn.open_table(Self::KEYSETS_TABLE)?; // this basically just creates the table if doesn't exist
-    write_txn.open_table(Self::KEYPAIRS_TABLE)?; // this basically just creates the table if doesn't exist
-    write_txn.open_table(Self::INVALID_INPUTS_TABLE)?; // this basically just creates the table if doesn't exist
+    write_txn.open_table(Self::MINT_KEYSETS_TABLE)?; // this basically just creates the table if doesn't exist
+    write_txn.open_table(Self::MINT_KEYPAIRS_TABLE)?; // this basically just creates the table if doesn't exist
+    write_txn.open_table(Self::MINT_INVALID_INPUTS_TABLE)?; // this basically just creates the table if doesn't exist
     write_txn.open_table(Self::MINT_QUOTES_TABLE)?; // this basically just creates the table if doesn't exist
     write_txn.commit()?;
 
@@ -338,7 +350,7 @@ impl CashuDatabase {
     let db = Database::create(format!("db/{}.redb", db_name))?;
 
     let write_txn = db.begin_write()?;
-    write_txn.open_table(Self::PROOFS_TABLE)?; // this basically just creates the table if doesn't exist
+    write_txn.open_table(Self::WALLET_PROOFS_TABLE)?; // this basically just creates the table if doesn't exist
     write_txn.open_table(Self::WALLET_QUOTES_TABLE)?; // this basically just creates the table if doesn't exist
     write_txn.commit()?;
 
@@ -350,10 +362,10 @@ impl CashuDatabase {
     let db = Database::create(format!("db/test/{}.redb", db_name))?;
 
     let write_txn = db.begin_write()?;
-    write_txn.open_table(Self::KEYSETS_TABLE)?; // this basically just creates the table if doesn't exist
-    write_txn.open_table(Self::KEYPAIRS_TABLE)?; // this basically just creates the table if doesn't exist
-    write_txn.open_table(Self::PROOFS_TABLE)?; // this basically just creates the table if doesn't exist
-    write_txn.open_table(Self::INVALID_INPUTS_TABLE)?; // this basically just creates the table if doesn't exist
+    write_txn.open_table(Self::MINT_KEYSETS_TABLE)?; // this basically just creates the table if doesn't exist
+    write_txn.open_table(Self::MINT_KEYPAIRS_TABLE)?; // this basically just creates the table if doesn't exist
+    write_txn.open_table(Self::WALLET_PROOFS_TABLE)?; // this basically just creates the table if doesn't exist
+    write_txn.open_table(Self::MINT_INVALID_INPUTS_TABLE)?; // this basically just creates the table if doesn't exist
     write_txn.open_table(Self::MINT_QUOTES_TABLE)?; // this basically just creates the table if doesn't exist
     write_txn.open_table(Self::WALLET_QUOTES_TABLE)?; // this basically just creates the table if doesn't exist
     write_txn.commit()?;
