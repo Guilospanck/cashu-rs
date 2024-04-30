@@ -42,9 +42,10 @@ pub struct Wallet {
   valid_proofs: Proofs,
   invalid_proofs: Proofs,
   quotes: Vec<(String, Amount)>,
-  url: String,
+  mint_url: String,
   mint: Mint,
   mint_keysets: Vec<KeysetWithKeys>,
+  db: CashuDatabase
 }
 
 impl Wallet {
@@ -80,9 +81,10 @@ impl Wallet {
       valid_proofs: proofs_with_valid_keyset_ids,
       invalid_proofs: proofs_with_invalid_keyset_ids,
       quotes,
-      url: mint_url,
+      mint_url,
       mint,
       mint_keysets,
+      db: wallet_db
     }
   }
 
@@ -115,13 +117,14 @@ impl Wallet {
       valid_proofs,
       invalid_proofs: proofs_with_invalid_keyset_ids,
       quotes,
-      url: mint_url,
+      mint_url,
       mint,
       mint_keysets,
+      db: wallet_db
     }
   }
 
-  pub fn mint_paid_quote(&self, quote_id: String) -> Result<()> {
+  pub fn mint_paid_quote(&mut self, quote_id: String) -> Result<()> {
     // get amount for this quote_id
     let amount = match self.quotes.iter().find(|(id, _)| *id == quote_id) {
       Some((_, amount)) => amount,
@@ -165,14 +168,17 @@ impl Wallet {
       Err(err) => return Err(WalletError::CouldNotMintToken(err.to_string())),
     };
 
-    let _new_proofs = self.build_proofs_from_promises(
+    let new_proofs = self.build_proofs_from_promises(
       blind_signatures,
       mint_sat_keys,
       blinding_factor,
       x_vec.to_vec(),
-    );
+    )?;
 
-    // TODO: save proofs in database
+    // Save new proofs in the database
+    let mut current_wallet_proofs_of_this_mint_in_db = self.db.get_all_proofs_from_mint(self.mint_url.clone()).unwrap();
+    current_wallet_proofs_of_this_mint_in_db.extend_from_slice(&new_proofs);
+    self.db.write_to_wallet_proofs_table(&self.mint_url, current_wallet_proofs_of_this_mint_in_db).unwrap();
 
     Ok(())
   }
