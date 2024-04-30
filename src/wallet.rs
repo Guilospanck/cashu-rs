@@ -45,7 +45,7 @@ pub struct Wallet {
   mint_url: String,
   mint: Mint,
   mint_keysets: Vec<KeysetWithKeys>,
-  db: CashuDatabase
+  db: CashuDatabase,
 }
 
 impl Wallet {
@@ -84,7 +84,7 @@ impl Wallet {
       mint_url,
       mint,
       mint_keysets,
-      db: wallet_db
+      db: wallet_db,
     }
   }
 
@@ -120,7 +120,7 @@ impl Wallet {
       mint_url,
       mint,
       mint_keysets,
-      db: wallet_db
+      db: wallet_db,
     }
   }
 
@@ -176,9 +176,9 @@ impl Wallet {
     )?;
 
     // Save new proofs in the database
-    let mut current_wallet_proofs_of_this_mint_in_db = self.db.get_all_proofs_from_mint(self.mint_url.clone()).unwrap();
-    current_wallet_proofs_of_this_mint_in_db.extend_from_slice(&new_proofs);
-    self.db.write_to_wallet_proofs_table(&self.mint_url, current_wallet_proofs_of_this_mint_in_db).unwrap();
+    let mut proofs_in_db = self.get_proofs_from_db();
+    proofs_in_db.extend_from_slice(&new_proofs);
+    self.save_new_proofs_to_db(proofs_in_db);
 
     Ok(())
   }
@@ -219,19 +219,33 @@ impl Wallet {
     let inputs = self.get_inputs_from_specific_amounts(amounts_sum);
 
     // Swaps inputs for blind_signatures
-    let blind_signatures: BlindSignatures = match self.mint.swap_tokens(inputs, outputs) {
+    let blind_signatures: BlindSignatures = match self.mint.swap_tokens(inputs.clone(), outputs) {
       Ok(value) => value,
       Err(e) => return Err(WalletError::CouldNotMintToken(e.to_string())),
     };
 
-    let _new_proofs = self.build_proofs_from_promises(
+    let new_proofs = self.build_proofs_from_promises(
       blind_signatures,
       mint_sat_keys,
       blinding_factor,
       x_vec.to_vec(),
-    );
+    )?;
 
-    // TODO: save proofs in database
+    // Remove used proofs from database
+    let proofs_in_db = self.get_proofs_from_db();
+    let mut proofs_updated: Proofs = vec![];
+    for proof in proofs_in_db {
+      if !inputs.contains(&proof) {
+        proofs_updated.push(proof);
+      }
+    }
+
+    // extend the proofs in db that weren't swapped with the new minted proofs
+    proofs_updated.extend_from_slice(&new_proofs);
+
+    // Save new proofs in the database
+    self.save_new_proofs_to_db(proofs_updated);
+
     Ok(())
   }
 
@@ -251,10 +265,21 @@ impl Wallet {
     }
   }
 
-  fn get_inputs_from_specific_amounts(
-    &self,
-    amounts_sum: Amount,
-  ) -> Proofs {
+  fn get_proofs_from_db(&mut self) -> Proofs {
+    self
+      .db
+      .get_all_proofs_from_mint(self.mint_url.clone())
+      .unwrap()
+  }
+
+  fn save_new_proofs_to_db(&mut self, new_proofs: Proofs) {
+    self
+      .db
+      .write_to_wallet_proofs_table(&self.mint_url, new_proofs)
+      .unwrap();
+  }
+
+  fn get_inputs_from_specific_amounts(&self, amounts_sum: Amount) -> Proofs {
     let mut inputs: Proofs = vec![];
     let mut current_amount = 0;
 
