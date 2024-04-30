@@ -86,6 +86,41 @@ impl Wallet {
     }
   }
 
+  pub fn new_testing_wallet(db_name: &str, valid_proofs: Proofs) -> Self {
+    let wallet_db = CashuDatabase::new_testing_db(db_name).unwrap();
+    let mint = Mint::new();
+    let mint_url = "http://my_mint_url.cashu".to_string();
+
+    // Get all (active) keysets from mint
+    let mint_keysets = mint.get_v1_keys().keysets;
+    let mint_keyset_ids = mint_keysets
+      .iter()
+      .map(|keyset| keyset.id.clone())
+      .collect::<Vec<String>>();
+    let all_proofs_from_mint = wallet_db
+      .get_all_proofs_from_mint(mint_url.clone())
+      .unwrap();
+
+    // This invalid proofs can be used to request swap of tokens (so we update their keyset_id)
+    let mut proofs_with_invalid_keyset_ids: Proofs = vec![];
+
+    for proof in all_proofs_from_mint {
+      if !mint_keyset_ids.contains(&proof.id) {
+        proofs_with_invalid_keyset_ids.push(proof);
+      }
+    }
+
+    let quotes = wallet_db.get_all_wallet_quotes().unwrap();
+    Self {
+      valid_proofs,
+      invalid_proofs: proofs_with_invalid_keyset_ids,
+      quotes,
+      url: mint_url,
+      mint,
+      mint_keysets,
+    }
+  }
+
   pub fn mint_paid_quote(&self, quote_id: String) -> Result<()> {
     // get amount for this quote_id
     let amount = match self.quotes.iter().find(|(id, _)| *id == quote_id) {
@@ -175,20 +210,7 @@ impl Wallet {
     }
 
     // Get some inputs we're going to use
-    let mut inputs: Proofs = vec![];
-    let mut current_amount = 0;
-    for proof in &self.valid_proofs {
-      let amount_to_go = amounts_sum - current_amount;
-      if amounts_in_binary_form.contains(&proof.amount) && proof.amount <= amount_to_go {
-        inputs.push(proof.clone());
-        current_amount += proof.amount;
-      }
-
-      // If I already have what I need, break
-      if current_amount == amounts_sum {
-        break;
-      }
-    }
+    let inputs = self.get_inputs_from_specific_amounts(amounts_sum, amounts_in_binary_form);
 
     // Swaps inputs for blind_signatures
     let blind_signatures: BlindSignatures = match self.mint.swap_tokens(inputs, outputs) {
@@ -221,6 +243,30 @@ impl Wallet {
       Ok(mint_quote) => Ok(mint_quote),
       Err(e) => Err(WalletError::CouldNotMintQuote(e.to_string())),
     }
+  }
+
+  // TODO: see test. This does not work as expected
+  fn get_inputs_from_specific_amounts(
+    &self,
+    amounts_sum: Amount,
+    amounts_in_binary_form: Vec<Amount>,
+  ) -> Proofs {
+    let mut inputs: Proofs = vec![];
+    let mut current_amount = 0;
+    for proof in &self.valid_proofs {
+      let amount_to_go = amounts_sum - current_amount;
+      if amounts_in_binary_form.contains(&proof.amount) && proof.amount <= amount_to_go {
+        inputs.push(proof.clone());
+        current_amount += proof.amount;
+      }
+
+      // If I already have what I need, break
+      if current_amount == amounts_sum {
+        break;
+      }
+    }
+
+    inputs
   }
 
   fn get_mint_keys_and_divisible_amounts_from_amount(
@@ -355,5 +401,79 @@ impl Wallet {
     }
 
     amounts
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use std::{fs, str::FromStr};
+
+  use bitcoin::secp256k1::PublicKey;
+
+  use crate::types::{Amount, Proof, Proofs};
+
+  use super::Wallet;
+
+  struct Sut {
+    wallet: Wallet,
+    db_name: String,
+  }
+
+  impl Drop for Sut {
+    fn drop(&mut self) {
+      self.remove_temp_db();
+    }
+  }
+
+  impl Sut {
+    fn new(db_name: &str, valid_proofs: Proofs) -> Self {
+      let wallet = Wallet::new_testing_wallet(db_name, valid_proofs);
+      Self {
+        wallet,
+        db_name: db_name.to_string(),
+      }
+    }
+
+    fn remove_temp_db(&self) {
+      fs::remove_file(format!("db/test/{}.redb", self.db_name)).unwrap();
+    }
+
+    fn gen_inputs_from_amount(amounts_binary_form: Vec<Amount>) -> Proofs {
+      let mut proofs: Proofs = vec![];
+      let pubkey =
+        PublicKey::from_str("02ec4a46e8d58aa75f03dc40a6ba58330fcb7d2c15ef99f901eca18d9d3bc6ec4e")
+          .unwrap();
+
+      let secret = "407218161f9f183768fcd1904b3180a89f9680ea5fd72f69a6ac7ef334aea2b3".to_string();
+
+      for amount in amounts_binary_form {
+        let proof = Proof {
+          amount,
+          c: pubkey,
+          id: "randomid".to_string(),
+          secret: secret.clone(),
+        };
+        proofs.push(proof);
+      }
+
+      proofs
+    }
+  }
+
+  #[test]
+  fn get_inputs_from_specific_amounts() {
+    // arrange
+    let inputs_amounts: Vec<Amount> = vec![2, 8, 16, 32, 64]; // 122
+    let inputs = Sut::gen_inputs_from_amount(inputs_amounts.clone());
+    let sut = Sut::new("get_inputs_from_specific_amounts", inputs);
+    let required_amount_to_swap_sum: Amount = 63;
+
+    let response_inputs = sut
+      .wallet
+      .get_inputs_from_specific_amounts(required_amount_to_swap_sum, inputs_amounts);
+
+    let response_total_amounts: Amount = response_inputs.iter().map(|proof| proof.amount).sum();
+
+    assert_ne!(response_total_amounts, required_amount_to_swap_sum);
   }
 }
