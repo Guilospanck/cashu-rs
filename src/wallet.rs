@@ -96,15 +96,8 @@ impl Wallet {
         ))
       }
     };
-    let amounts_in_powers_of_two = self.express_amount_in_binary_form(*amount);
-
-    let sat_keyset = self
-      .mint_keysets
-      .iter()
-      .find(|keyset| keyset.unit == Unit::SAT)
-      .unwrap();
-
-    let mint_sat_keys = &sat_keyset.keys;
+    let (amounts_in_powers_of_two, sat_keyset, mint_sat_keys) =
+      self.get_mint_keys_and_divisible_amounts_from_amount(*amount);
 
     let method = PaymentMethod::BOLT11;
     let mut outputs: BlindedMessages = vec![];
@@ -168,30 +161,28 @@ impl Wallet {
   // TODO: Wallets SHOULD store keysets the first time they encounter them along with the URL of the mint they are from.
   // TODO: Wallets SHOULD spend Proofs of inactive keysets first
   // TODO: When constructing outputs for an operation, wallets MUST choose only active keysets
-  pub fn swap_tokens(&mut self) -> Result<()> {
-    let sat_keyset = self
-      .mint_keysets
-      .iter()
-      .find(|keyset| keyset.unit == Unit::SAT)
-      .unwrap();
+  pub fn swap_tokens(&mut self, amounts: Vec<Amount>) -> Result<()> {
+    let amounts_sum = amounts.iter().sum();
 
-    // TODO: check if the amount we have is allowed for the mint and, if not,
-    // TODO: check if can be divisible (by 2).
-    // Example: if we want 63 sats and the mint only allows 1, 2, 4, 8, 16, it could be
-    // done with 3*16 (48) + 1*8 (8) + 1*4 (4) + 1*2 (2) + 1*1 (1) = 63
-    let mint_sat_keys = &sat_keyset.keys;
+    let (_, sat_keyset, mint_sat_keys) =
+      self.get_mint_keys_and_divisible_amounts_from_amount(amounts_sum);
+
+    // Picks secret x (utf-8 encoded 32 bytes encoded string) -- coin ID
+    let (x, _) = generate_key_pair();
+    let x_vec: [u8; 32] = x.secret_bytes();
 
     // Get r, the blinding factor. r \in [0, (p-1)/2) <- part of the curve
     let (blinding_factor, _) = generate_key_pair();
 
+    // Build the outputs based on the Vec<Amounts>
     let mut outputs: BlindedMessages = vec![];
-    // TODO: select which proofs we want
-    for proof in &self.valid_proofs {
-      let x_vec = hex::decode(proof.secret.clone()).unwrap();
-      // Computes `B_ = Y + rG`, with r being a random blinding factor (blinding)
-      // TODO: here it looks like we can change the amount, so we request different pocket change tokens from mint
-      let blinded_message = match self.blind(x_vec, blinding_factor, proof.amount, proof.id.clone())
-      {
+    for amount in amounts {
+      let blinded_message = match self.blind(
+        x_vec.to_vec(),
+        blinding_factor,
+        amount,
+        sat_keyset.id.clone(),
+      ) {
         Ok(value) => value,
         Err(e) => return Err(WalletError::BlindError(e.to_string())),
       };
@@ -199,9 +190,23 @@ impl Wallet {
       outputs.push(blinded_message);
     }
 
+    // Get some inputs we're going to use
+    // TODO: get all the inputs that the total amount will
+    // match exactly what we need...
+    let mut inputs: Proofs = vec![];
+    let mut current_amount = 0;
+    for proof in &self.valid_proofs {
+      inputs.push(proof.clone());
+      current_amount += proof.amount;
+      // If I already have what I need, break
+      if current_amount == amounts_sum {
+        break;
+      }
+    }
+
     // Swaps inputs for blind_signatures
     let blind_signatures: BlindSignatures =
-      match self.mint.swap_tokens(self.valid_proofs.clone(), outputs) {
+      match self.mint.swap_tokens(inputs, outputs) {
         Ok(value) => value,
         Err(e) => return Err(WalletError::CouldNotMintToken(e.to_string())),
       };
@@ -245,6 +250,26 @@ impl Wallet {
       Ok(mint_quote) => Ok(mint_quote),
       Err(e) => Err(WalletError::CouldNotMintQuote(e.to_string())),
     }
+  }
+
+  fn get_mint_keys_and_divisible_amounts_from_amount(
+    &self,
+    amount: u64,
+  ) -> (
+    Vec<u64>,
+    KeysetWithKeys,
+    std::collections::BTreeMap<u64, PublicKey>,
+  ) {
+    let amounts_in_powers_of_two = self.express_amount_in_binary_form(amount);
+
+    let sat_keyset = self
+      .mint_keysets
+      .iter()
+      .find(|keyset| keyset.unit == Unit::SAT)
+      .unwrap();
+
+    let mint_sat_keys = &sat_keyset.keys;
+    (amounts_in_powers_of_two, sat_keyset.clone(), mint_sat_keys.clone())
   }
 
   // Computes `B_ = Y + rG`, with r being a random blinding factor (blinding)
