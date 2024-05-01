@@ -299,7 +299,18 @@ impl CashuDatabase {
     Ok(mint_quotes)
   }
 
-  // TODO: create unit test and create the method to write to wallet quotes table
+  // TODO: unit test
+  pub fn write_to_wallet_quotes_table(&mut self, quote_id: String, amount: Amount) -> Result<()> {
+    let write_txn = self.begin_write()?;
+    {
+      let mut table = write_txn.open_table(Self::WALLET_QUOTES_TABLE)?;
+      table.insert(quote_id.as_str(), amount.to_string().as_str())?;
+    }
+    self.commit_txn(write_txn)?;
+    Ok(())
+  }
+
+  // TODO: create unit test
   pub fn get_all_wallet_quotes(&self) -> Result<Vec<(String, Amount)>> {
     let mut wallet_quotes: Vec<(String, Amount)> = vec![];
     let read_txn = self.db.begin_read()?;

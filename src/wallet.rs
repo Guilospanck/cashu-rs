@@ -249,20 +249,23 @@ impl Wallet {
     Ok(())
   }
 
-  // TODO: The wallet MUST store the `amount` in the request and
-  // TODO: the `quote id` in the response in its database so it can later request the tokens after paying the request.
   pub fn mint_quote(
-    &self,
+    &mut self,
     method: PaymentMethod,
     amount: Amount,
     unit: Unit,
   ) -> Result<PostMintQuoteBolt11Response> {
     let mut mint = Mint::new();
 
-    match mint.mint_quote(method, amount, unit) {
-      Ok(mint_quote) => Ok(mint_quote),
-      Err(e) => Err(WalletError::CouldNotMintQuote(e.to_string())),
-    }
+    let mint_quote_response = match mint.mint_quote(method, amount, unit) {
+      Ok(mint_quote) => mint_quote,
+      Err(e) => return Err(WalletError::CouldNotMintQuote(e.to_string())),
+    };
+
+    // save quote to db
+    self.save_quote_to_db(mint_quote_response.clone().quote, amount);
+
+    Ok(mint_quote_response)
   }
 
   fn get_proofs_from_db(&mut self) -> Proofs {
@@ -276,6 +279,13 @@ impl Wallet {
     self
       .db
       .write_to_wallet_proofs_table(&self.mint_url, new_proofs)
+      .unwrap();
+  }
+
+  fn save_quote_to_db(&mut self, quote_id: String, amount: Amount) {
+    self
+      .db
+      .write_to_wallet_quotes_table(quote_id, amount)
       .unwrap();
   }
 
