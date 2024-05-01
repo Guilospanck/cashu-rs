@@ -203,8 +203,6 @@ impl Mint {
     Ok(promises)
   }
 
-  // TODO: The wallet MUST store the `amount` in the request and the `quote` id in the response
-  // TODO: in its database so it can later request the tokens after paying the request.
   pub fn mint_quote(
     &mut self,
     method: PaymentMethod,

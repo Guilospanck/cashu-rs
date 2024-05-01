@@ -38,13 +38,16 @@ pub enum WalletError {
 
 type Result<T> = result::Result<T, WalletError>;
 
-pub struct Wallet {
+struct ValidAndInvalidProofs {
   valid_proofs: Proofs,
   invalid_proofs: Proofs,
+}
+
+pub struct Wallet {
   quotes: Vec<(String, Amount)>,
   mint_url: String,
   mint: Mint,
-  mint_keysets: Vec<KeysetWithKeys>,
+  mint_valid_keysets: Vec<KeysetWithKeys>,
   db: CashuDatabase,
 }
 
@@ -55,71 +58,32 @@ impl Wallet {
     let mint_url = "http://my_mint_url.cashu".to_string();
 
     // Get all (active) keysets from mint
-    let mint_keysets = mint.get_v1_keys().keysets;
-    let mint_keyset_ids = mint_keysets
-      .iter()
-      .map(|keyset| keyset.id.clone())
-      .collect::<Vec<String>>();
-    let all_proofs_from_mint = wallet_db
-      .get_all_proofs_from_mint(mint_url.clone())
-      .unwrap();
-
-    let mut proofs_with_valid_keyset_ids: Proofs = vec![];
-    // This invalid proofs can be used to request swap of tokens (so we update their keyset_id)
-    let mut proofs_with_invalid_keyset_ids: Proofs = vec![];
-
-    for proof in all_proofs_from_mint {
-      if mint_keyset_ids.contains(&proof.id) {
-        proofs_with_valid_keyset_ids.push(proof);
-      } else {
-        proofs_with_invalid_keyset_ids.push(proof);
-      }
-    }
+    let mint_valid_keysets = mint.get_v1_keys().keysets;
 
     let quotes = wallet_db.get_all_wallet_quotes().unwrap();
     Self {
-      valid_proofs: proofs_with_valid_keyset_ids,
-      invalid_proofs: proofs_with_invalid_keyset_ids,
       quotes,
       mint_url,
       mint,
-      mint_keysets,
+      mint_valid_keysets,
       db: wallet_db,
     }
   }
 
-  pub fn new_testing_wallet(db_name: &str, valid_proofs: Proofs) -> Self {
+  pub fn new_testing_wallet(db_name: &str) -> Self {
     let wallet_db = CashuDatabase::new_testing_db(db_name).unwrap();
     let mint = Mint::new();
     let mint_url = "http://my_mint_url.cashu".to_string();
 
     // Get all (active) keysets from mint
-    let mint_keysets = mint.get_v1_keys().keysets;
-    let mint_keyset_ids = mint_keysets
-      .iter()
-      .map(|keyset| keyset.id.clone())
-      .collect::<Vec<String>>();
-    let all_proofs_from_mint = wallet_db
-      .get_all_proofs_from_mint(mint_url.clone())
-      .unwrap();
-
-    // This invalid proofs can be used to request swap of tokens (so we update their keyset_id)
-    let mut proofs_with_invalid_keyset_ids: Proofs = vec![];
-
-    for proof in all_proofs_from_mint {
-      if !mint_keyset_ids.contains(&proof.id) {
-        proofs_with_invalid_keyset_ids.push(proof);
-      }
-    }
+    let mint_valid_keysets = mint.get_v1_keys().keysets;
 
     let quotes = wallet_db.get_all_wallet_quotes().unwrap();
     Self {
-      valid_proofs,
-      invalid_proofs: proofs_with_invalid_keyset_ids,
       quotes,
       mint_url,
       mint,
-      mint_keysets,
+      mint_valid_keysets,
       db: wallet_db,
     }
   }
@@ -183,9 +147,6 @@ impl Wallet {
     Ok(())
   }
 
-  // TODO: Wallets SHOULD store keysets the first time they encounter them along with the URL of the mint they are from.
-  // TODO: Wallets SHOULD spend Proofs of inactive keysets first
-  // TODO: When constructing outputs for an operation, wallets MUST choose only active keysets
   pub fn swap_tokens(&mut self, amounts: Vec<Amount>) -> Result<()> {
     let amounts_sum = amounts.iter().sum();
 
@@ -268,6 +229,34 @@ impl Wallet {
     Ok(mint_quote_response)
   }
 
+  fn get_valid_and_invalid_proofs(&self) -> ValidAndInvalidProofs {
+    let mint_valid_keyset_ids = self
+      .mint_valid_keysets
+      .iter()
+      .map(|keyset| keyset.id.clone())
+      .collect::<Vec<String>>();
+    let all_proofs_from_mint = self
+      .db
+      .get_all_proofs_from_mint(self.mint_url.clone())
+      .unwrap();
+
+    let mut proofs_with_valid_keyset_ids: Proofs = vec![];
+    let mut proofs_with_invalid_keyset_ids: Proofs = vec![];
+
+    for proof in all_proofs_from_mint {
+      if mint_valid_keyset_ids.contains(&proof.id) {
+        proofs_with_valid_keyset_ids.push(proof);
+      } else {
+        proofs_with_invalid_keyset_ids.push(proof);
+      }
+    }
+
+    ValidAndInvalidProofs {
+      valid_proofs: proofs_with_valid_keyset_ids,
+      invalid_proofs: proofs_with_invalid_keyset_ids,
+    }
+  }
+
   fn get_proofs_from_db(&mut self) -> Proofs {
     self
       .db
@@ -293,7 +282,24 @@ impl Wallet {
     let mut inputs: Proofs = vec![];
     let mut current_amount = 0;
 
-    for proof in &self.valid_proofs {
+    let proofs = self.get_valid_and_invalid_proofs();
+
+    // Wallets SHOULD spend Proofs of inactive keysets first
+    for proof in proofs.invalid_proofs {
+      inputs.push(proof.clone());
+      current_amount += proof.amount;
+
+      // If I already have what I need, break
+      if current_amount >= amounts_sum {
+        break;
+      }
+    }
+
+    if current_amount >= amounts_sum {
+      return inputs
+    }
+
+    for proof in proofs.valid_proofs {
       inputs.push(proof.clone());
       current_amount += proof.amount;
 
@@ -317,7 +323,7 @@ impl Wallet {
     let amounts_in_powers_of_two = self.express_amount_in_binary_form(amount);
 
     let sat_keyset = self
-      .mint_keysets
+      .mint_valid_keysets
       .iter()
       .find(|keyset| keyset.unit == Unit::SAT)
       .unwrap();
@@ -463,8 +469,13 @@ mod tests {
   }
 
   impl Sut {
-    fn new(db_name: &str, valid_proofs: Proofs) -> Self {
-      let wallet = Wallet::new_testing_wallet(db_name, valid_proofs);
+    fn new(db_name: &str, valid_proofs: Proofs, invalid_proofs: Proofs) -> Self {
+      let mut wallet = Wallet::new_testing_wallet(db_name);
+
+      let mut proofs = valid_proofs;
+      proofs.extend_from_slice(&invalid_proofs);
+      let _ = wallet.db.write_to_wallet_proofs_table(&wallet.mint_url, proofs);
+
       Self {
         wallet,
         db_name: db_name.to_string(),
@@ -502,7 +513,7 @@ mod tests {
     // arrange
     let inputs_amounts: Vec<Amount> = vec![2, 8, 16, 32, 64]; // 122
     let inputs = Sut::gen_inputs_from_amount(inputs_amounts.clone());
-    let sut = Sut::new("get_inputs_from_specific_amounts", inputs);
+    let sut = Sut::new("get_inputs_from_specific_amounts", inputs, vec![]);
     let required_amount_to_swap_sum: Amount = 63; // [1, 2, 4, 8, 16, 32]
 
     let response_inputs = sut
