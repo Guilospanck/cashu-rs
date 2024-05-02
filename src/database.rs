@@ -7,7 +7,7 @@ use strum::{EnumString, IntoStaticStr};
 use crate::{
   helpers::sha256_hasher,
   keyset::KeysetWithKeys,
-  rest::PostMintQuoteBolt11Response,
+  rest::{PostMeltQuoteBolt11Response, PostMintQuoteBolt11Response},
   types::{Amount, Keypair, Keypairs, Proof, Proofs, Token, Tokens},
 };
 
@@ -87,8 +87,11 @@ impl CashuDatabase {
   const MINT_INVALID_INPUTS_TABLE: TableDefinition<'static, &'static str, &'static str> =
     TableDefinition::new("invalid_proofs");
   // quote_id, PostMintQuoteBolt11Response
-  const MINT_QUOTES_TABLE: TableDefinition<'static, &'static str, &'static str> =
-    TableDefinition::new("mint_quotes");
+  const MINT_MINT_QUOTES_TABLE: TableDefinition<'static, &'static str, &'static str> =
+    TableDefinition::new("mint_mint_quotes");
+  // quote_id, PostMeltQuoteBolt11Response
+  const MINT_MELT_QUOTES_TABLE: TableDefinition<'static, &'static str, &'static str> =
+    TableDefinition::new("mint_melt_quotes");
 
   /// WALLET
   // mint_url, proofs
@@ -260,7 +263,7 @@ impl CashuDatabase {
     let mint_quote_serialized = serde_json::to_string(&v)?;
     let write_txn = self.begin_write()?;
     {
-      let mut table = write_txn.open_table(Self::MINT_QUOTES_TABLE)?;
+      let mut table = write_txn.open_table(Self::MINT_MINT_QUOTES_TABLE)?;
       table.insert(quote_id.as_str(), mint_quote_serialized.as_str())?;
     }
     self.commit_txn(write_txn)?;
@@ -269,7 +272,7 @@ impl CashuDatabase {
 
   pub fn get_mint_quote(&self, quote_id: String) -> Result<Option<PostMintQuoteBolt11Response>> {
     let read_txn = self.db.begin_read()?;
-    let table = read_txn.open_table(Self::MINT_QUOTES_TABLE)?;
+    let table = read_txn.open_table(Self::MINT_MINT_QUOTES_TABLE)?;
 
     let response = table.get(quote_id.as_str()).unwrap().map(|mint_quote| {
       let mint_quote_deserialized: PostMintQuoteBolt11Response =
@@ -283,13 +286,59 @@ impl CashuDatabase {
   pub fn get_all_mint_quotes(&self) -> Result<Vec<PostMintQuoteBolt11Response>> {
     let mut mint_quotes: Vec<PostMintQuoteBolt11Response> = vec![];
     let read_txn = self.db.begin_read()?;
-    let table = read_txn.open_table(Self::MINT_QUOTES_TABLE)?;
+    let table = read_txn.open_table(Self::MINT_MINT_QUOTES_TABLE)?;
 
     table.iter().unwrap().for_each(|db_mint_quote| {
       let evt = db_mint_quote.unwrap();
       let mint_quote = evt.1.value();
 
       let mint_quote_deserialized: PostMintQuoteBolt11Response =
+        serde_json::from_str(mint_quote).unwrap();
+
+      mint_quotes.push(mint_quote_deserialized);
+    });
+
+    Ok(mint_quotes)
+  }
+
+  // TODO: unit test
+  pub fn write_to_melt_quotes_table(&mut self, v: PostMeltQuoteBolt11Response) -> Result<()> {
+    let quote_id = v.clone().quote;
+    let melt_quote_serialized = serde_json::to_string(&v)?;
+    let write_txn = self.begin_write()?;
+    {
+      let mut table = write_txn.open_table(Self::MINT_MELT_QUOTES_TABLE)?;
+      table.insert(quote_id.as_str(), melt_quote_serialized.as_str())?;
+    }
+    self.commit_txn(write_txn)?;
+    Ok(())
+  }
+
+  // TODO: unit test
+  pub fn get_melt_quote(&self, quote_id: String) -> Result<Option<PostMeltQuoteBolt11Response>> {
+    let read_txn = self.db.begin_read()?;
+    let table = read_txn.open_table(Self::MINT_MELT_QUOTES_TABLE)?;
+
+    let response = table.get(quote_id.as_str()).unwrap().map(|melt_quote| {
+      let melt_quote_deserialized: PostMeltQuoteBolt11Response =
+        serde_json::from_str(melt_quote.value()).unwrap();
+      melt_quote_deserialized
+    });
+
+    Ok(response)
+  }
+
+  // TODO: unit test
+  pub fn get_all_melt_quotes(&self) -> Result<Vec<PostMeltQuoteBolt11Response>> {
+    let mut mint_quotes: Vec<PostMeltQuoteBolt11Response> = vec![];
+    let read_txn = self.db.begin_read()?;
+    let table = read_txn.open_table(Self::MINT_MELT_QUOTES_TABLE)?;
+
+    table.iter().unwrap().for_each(|db_melt_quote| {
+      let evt = db_melt_quote.unwrap();
+      let mint_quote = evt.1.value();
+
+      let mint_quote_deserialized: PostMeltQuoteBolt11Response =
         serde_json::from_str(mint_quote).unwrap();
 
       mint_quotes.push(mint_quote_deserialized);
@@ -348,7 +397,8 @@ impl CashuDatabase {
     write_txn.open_table(Self::MINT_KEYSETS_TABLE)?; // this basically just creates the table if doesn't exist
     write_txn.open_table(Self::MINT_KEYPAIRS_TABLE)?; // this basically just creates the table if doesn't exist
     write_txn.open_table(Self::MINT_INVALID_INPUTS_TABLE)?; // this basically just creates the table if doesn't exist
-    write_txn.open_table(Self::MINT_QUOTES_TABLE)?; // this basically just creates the table if doesn't exist
+    write_txn.open_table(Self::MINT_MINT_QUOTES_TABLE)?; // this basically just creates the table if doesn't exist
+    write_txn.open_table(Self::MINT_MELT_QUOTES_TABLE)?; // this basically just creates the table if doesn't exist
     write_txn.commit()?;
 
     Ok(Self { db })
@@ -374,8 +424,9 @@ impl CashuDatabase {
     write_txn.open_table(Self::MINT_KEYPAIRS_TABLE)?; // this basically just creates the table if doesn't exist
     write_txn.open_table(Self::WALLET_PROOFS_TABLE)?; // this basically just creates the table if doesn't exist
     write_txn.open_table(Self::MINT_INVALID_INPUTS_TABLE)?; // this basically just creates the table if doesn't exist
-    write_txn.open_table(Self::MINT_QUOTES_TABLE)?; // this basically just creates the table if doesn't exist
+    write_txn.open_table(Self::MINT_MINT_QUOTES_TABLE)?; // this basically just creates the table if doesn't exist
     write_txn.open_table(Self::WALLET_QUOTES_TABLE)?; // this basically just creates the table if doesn't exist
+    write_txn.open_table(Self::MINT_MELT_QUOTES_TABLE)?; // this basically just creates the table if doesn't exist
     write_txn.commit()?;
 
     Ok(Self { db })

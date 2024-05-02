@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
   keyset::{Keyset, KeysetWithKeys},
-  types::{Amount, BlindSignatures, BlindedMessages},
+  types::{Amount, BlindSignatures, BlindedMessages, Proofs, Unit},
 };
 
 pub struct GetKeysResponse {
@@ -54,4 +54,40 @@ pub struct PostMintBolt11Request {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PostMintBolt11Response {
   pub signatures: BlindSignatures
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PostMeltQuoteBolt11Request {
+  pub request: String, // bolt11 invoice to be paid
+  pub unit: Unit
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PostMeltQuoteBolt11Response {
+  /// The quote ID
+  pub quote: String,
+  /// Payment amount that needs to be paid
+  pub amount: Amount,
+  /// Additional fee reserve that is required
+  /// The mint expects the wallet to include proofs of
+  /// at least `total_amount = amount + fee_reserve`
+  pub fee_reserve: Amount,
+  /// If quote has been paid
+  pub paid: bool,
+  /// Unix timestamp (seconds) until which the melt quote is valid
+  pub expiry: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PostMeltBolt11Request {
+  pub quote: String,
+  pub inputs: Proofs
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PostMeltBolt11Response {
+  /// If payment was successful
+  pub paid: bool,
+  /// Bolt11 payment preimage in case of a successful payment
+  pub payment_preimage: Option<String>,
 }

@@ -14,8 +14,9 @@ use crate::{
   helpers::hash_to_curve,
   keyset::{generate_keyset_and_keypairs, Keyset, KeysetWithKeys, Keysets},
   rest::{
-    GetKeysResponse, GetKeysetsResponse, PostMintBolt11Request, PostMintBolt11Response,
-    PostMintQuoteBolt11Response,
+    GetKeysResponse, GetKeysetsResponse, PostMeltBolt11Request, PostMeltBolt11Response,
+    PostMeltQuoteBolt11Request, PostMeltQuoteBolt11Response, PostMintBolt11Request,
+    PostMintBolt11Response, PostMintQuoteBolt11Response,
   },
   types::{
     Amount, BlindSignature, BlindSignatures, BlindedMessage, BlindedMessages, Keypairs,
@@ -42,6 +43,8 @@ pub enum MintError {
   CouldNotCreateMintQuote(String),
   #[error("Mint quote not found: `{0}`")]
   MintQuoteNotFound(String),
+  #[error("Melt quote not found: `{0}`")]
+  MeltQuoteNotFound(String),
   #[error("Mint quote not paid")]
   MintQuoteNotPaid,
 }
@@ -231,6 +234,72 @@ impl Mint {
       .map_err(|e| MintError::CouldNotCreateMintQuote(e.to_string()));
 
     Ok(mint_quote)
+  }
+
+  // TODO: unit test
+  pub fn melt_quote(
+    &mut self,
+    PostMeltQuoteBolt11Request {
+      request: _,
+      unit: _,
+    }: PostMeltQuoteBolt11Request,
+  ) -> PostMeltQuoteBolt11Response {
+    let quote: String = Uuid::new_v4().to_string();
+
+    // TODO: decode the request using bolt11 into amount, expiry etc
+    let amount: Amount = 10;
+    let fee_reserve: Amount = 0;
+    let expiry: i64 = Utc::now().timestamp() + 3600;
+    let paid = false;
+
+    let response = PostMeltQuoteBolt11Response {
+      quote,
+      amount,
+      fee_reserve,
+      paid,
+      expiry,
+    };
+
+    self
+      .db
+      .write_to_melt_quotes_table(response.clone())
+      .unwrap();
+
+    response
+  }
+
+  // TODO: unit test
+  pub fn melt(
+    &self,
+    PostMeltBolt11Request { quote, inputs }: PostMeltBolt11Request,
+  ) -> Result<PostMeltBolt11Response> {
+    // Get quote info from database
+    let quote_info = match self.db.get_melt_quote(quote) {
+      Ok(res) => {
+        if res.is_none() {
+          return Err(MintError::MeltQuoteNotFound("".to_string()));
+        }
+
+        res.unwrap()
+      }
+      Err(e) => return Err(MintError::MeltQuoteNotFound(e.to_string())),
+    };
+
+    // Check if inputs have the necessary amount to pay the invoice
+    let amount_needed = quote_info.amount + quote_info.fee_reserve;
+    let total_amount_of_inputs: Amount = inputs.iter().map(|proof| proof.amount).sum();
+    if total_amount_of_inputs < amount_needed {
+      return Err(MintError::InsufficientFunds);
+    }
+
+    // TODO: use bolt11 to pay amount
+
+    let response = PostMeltBolt11Response {
+      paid: false,
+      payment_preimage: None,
+    };
+
+    Ok(response)
   }
 
   pub fn check_mint_paid(&self, quote_id: String) -> Result<PostMintQuoteBolt11Response> {
@@ -772,37 +841,31 @@ mod tests {
       .unwrap();
     assert_eq!(res_ok.signatures, expected_signatures);
 
-    let res_ok = sut
-      .mint
-      .mint(
-        method.clone(),
-        PostMintBolt11Request {
-          quote_id: mint_quotes[1].quote.clone(),
-          outputs: valid_outputs.clone(),
-        },
-      );
+    let res_ok = sut.mint.mint(
+      method.clone(),
+      PostMintBolt11Request {
+        quote_id: mint_quotes[1].quote.clone(),
+        outputs: valid_outputs.clone(),
+      },
+    );
     assert!(res_ok.is_err_and(|x| x == MintError::MintQuoteNotPaid));
 
-    let res_ok = sut
-      .mint
-      .mint(
-        method,
-        PostMintBolt11Request {
-          quote_id: mint_quotes[2].quote.clone(),
-          outputs: valid_outputs.clone(),
-        },
-      );
+    let res_ok = sut.mint.mint(
+      method,
+      PostMintBolt11Request {
+        quote_id: mint_quotes[2].quote.clone(),
+        outputs: valid_outputs.clone(),
+      },
+    );
     assert!(res_ok.is_err_and(|x| x == MintError::AmountsDoNotMatch));
 
-    let res_ok = sut
-      .mint
-      .mint(
-        invalid_method,
-        PostMintBolt11Request {
-          quote_id: mint_quotes[0].quote.clone(),
-          outputs: valid_outputs,
-        },
-      );
+    let res_ok = sut.mint.mint(
+      invalid_method,
+      PostMintBolt11Request {
+        quote_id: mint_quotes[0].quote.clone(),
+        outputs: valid_outputs,
+      },
+    );
     assert!(res_ok.is_err_and(|x| x == MintError::PaymentMethodNotSupported));
   }
 
