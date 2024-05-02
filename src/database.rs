@@ -165,7 +165,6 @@ impl CashuDatabase {
     Ok(keysets)
   }
 
-  // TODO: unit tests
   pub fn write_to_wallet_proofs_table(&mut self, mint_url: &str, proofs: Proofs) -> Result<()> {
     let proofs_serialized = serde_json::to_string(&proofs)?;
     let write_txn = self.begin_write()?;
@@ -299,7 +298,6 @@ impl CashuDatabase {
     Ok(mint_quotes)
   }
 
-  // TODO: unit test
   pub fn write_to_wallet_quotes_table(&mut self, quote_id: String, amount: Amount) -> Result<()> {
     let write_txn = self.begin_write()?;
     {
@@ -310,7 +308,6 @@ impl CashuDatabase {
     Ok(())
   }
 
-  // TODO: create unit test
   pub fn get_all_wallet_quotes(&self) -> Result<Vec<(String, Amount)>> {
     let mut wallet_quotes: Vec<(String, Amount)> = vec![];
     let read_txn = self.db.begin_read()?;
@@ -641,6 +638,66 @@ mod tests {
   }
 
   #[test]
+  fn write_to_wallet_quotes_table() {
+    // arrange
+    let mut sut = Sut::new("write_to_wallet_quotes_table");
+    let mock_quotes = [
+      ("quote_id_0", 16u64),
+      ("quote_id_1", 32u64),
+      ("quote_id_2", 64u64),
+    ];
+
+    // act
+    let result = sut.db.get_all_wallet_quotes().unwrap();
+    assert_eq!(result.len(), 0);
+    let _ = sut
+      .db
+      .write_to_wallet_quotes_table(mock_quotes[0].0.to_string(), mock_quotes[0].1);
+    let _ = sut
+      .db
+      .write_to_wallet_quotes_table(mock_quotes[1].0.to_string(), mock_quotes[1].1);
+    let _ = sut
+      .db
+      .write_to_wallet_quotes_table(mock_quotes[2].0.to_string(), mock_quotes[2].1);
+
+    let result = sut.db.get_all_wallet_quotes().unwrap();
+    assert_eq!(result.len(), 3);
+  }
+
+  #[test]
+  fn write_to_wallet_proofs_table() {
+    // arrange
+    let mut sut = Sut::new("write_to_wallet_proofs_table");
+    let mock_proofs = sut.gen_invalid_proofs();
+
+    // act
+    let result = sut.db.get_all_tokens().unwrap();
+    assert_eq!(result.len(), 0);
+
+    let mint_url0 = "mint0.com";
+    let _ = sut
+      .db
+      .write_to_wallet_proofs_table(mint_url0, vec![mock_proofs[0].clone()]);
+    let mint_url1 = "mint1.com";
+    let _ = sut
+      .db
+      .write_to_wallet_proofs_table(mint_url1, vec![mock_proofs[1].clone()]);
+    let mint_url2 = "mint2.com";
+    let _ = sut
+      .db
+      .write_to_wallet_proofs_table(mint_url2, vec![mock_proofs[2].clone()]);
+
+    let result = sut.db.get_all_tokens().unwrap();
+    assert_eq!(result.len(), 3);
+
+    let res = sut
+      .db
+      .get_all_proofs_from_mint(mint_url0.to_string())
+      .unwrap();
+    assert_eq!(res, vec![mock_proofs[0].clone()]);
+  }
+
+  #[test]
   fn get_all_keysets() {
     let sut = Sut::new("get_all_keysets");
 
@@ -692,6 +749,15 @@ mod tests {
     let sut = Sut::new("get_all_mint_quotes");
 
     let result = sut.db.get_all_mint_quotes().unwrap();
+
+    assert_eq!(result.len(), 0);
+  }
+
+  #[test]
+  fn get_all_wallet_quotes() {
+    let sut = Sut::new("get_all_wallet_quotes");
+
+    let result = sut.db.get_all_wallet_quotes().unwrap();
 
     assert_eq!(result.len(), 0);
   }
