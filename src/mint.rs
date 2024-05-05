@@ -243,7 +243,7 @@ impl Mint {
       request: _,
       unit: _,
     }: PostMeltQuoteBolt11Request,
-  ) -> PostMeltQuoteBolt11Response {
+  ) -> Result<PostMeltQuoteBolt11Response> {
     let quote: String = Uuid::new_v4().to_string();
 
     // TODO: decode the request using bolt11 into amount, expiry etc
@@ -265,7 +265,7 @@ impl Mint {
       .write_to_melt_quotes_table(response.clone())
       .unwrap();
 
-    response
+    Ok(response)
   }
 
   // TODO: unit test
@@ -302,7 +302,7 @@ impl Mint {
     Ok(response)
   }
 
-  pub fn check_mint_paid(&self, quote_id: String) -> Result<PostMintQuoteBolt11Response> {
+  pub fn check_mint_quote_state(&self, quote_id: String) -> Result<PostMintQuoteBolt11Response> {
     match self.db.get_mint_quote(quote_id) {
       Ok(res) => {
         if res.is_none() {
@@ -315,12 +315,26 @@ impl Mint {
     }
   }
 
+  // TODO: unit tests
+  pub fn check_melt_quote_state(&self, quote_id: String) -> Result<PostMeltQuoteBolt11Response> {
+    match self.db.get_melt_quote(quote_id) {
+      Ok(res) => {
+        if res.is_none() {
+          return Err(MintError::MeltQuoteNotFound("".to_string()));
+        }
+
+        Ok(res.unwrap())
+      }
+      Err(e) => Err(MintError::MeltQuoteNotFound(e.to_string())),
+    }
+  }
+
   pub fn mint(
     &self,
     method: PaymentMethod,
     PostMintBolt11Request { quote_id, outputs }: PostMintBolt11Request,
   ) -> Result<PostMintBolt11Response> {
-    let mint_quote = self.check_mint_paid(quote_id)?;
+    let mint_quote = self.check_mint_quote_state(quote_id)?;
 
     // check if mint_quote is paid
     if !mint_quote.paid {
@@ -795,12 +809,12 @@ mod tests {
   }
 
   #[test]
-  fn check_mint_paid() {
-    let mut sut = Sut::new("check_mint_paid");
+  fn check_mint_quote_state() {
+    let mut sut = Sut::new("check_mint_quote_state");
     let invalid_quote_id = "invalidquoteid".to_string();
 
     // check invalid quote
-    let res_ok = sut.mint.check_mint_paid(invalid_quote_id);
+    let res_ok = sut.mint.check_mint_quote_state(invalid_quote_id);
     assert!(res_ok.is_err_and(|x| matches!(x, MintError::MintQuoteNotFound(_))));
 
     // mint quote
@@ -810,7 +824,7 @@ mod tests {
     let mint_quote = sut.mint.mint_quote(method, amount, unit).unwrap();
 
     // check valid quote_id
-    let res_ok = sut.mint.check_mint_paid(mint_quote.clone().quote).unwrap();
+    let res_ok = sut.mint.check_mint_quote_state(mint_quote.clone().quote).unwrap();
     assert_eq!(res_ok.quote, mint_quote.quote);
     assert!(!res_ok.paid);
     assert_eq!(res_ok.expiry, mint_quote.expiry);

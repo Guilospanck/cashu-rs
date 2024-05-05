@@ -5,7 +5,10 @@ use crate::{
   helpers::{generate_key_pair, hash_to_curve},
   keyset::KeysetWithKeys,
   mint::Mint,
-  rest::{PostMintBolt11Request, PostMintQuoteBolt11Response},
+  rest::{
+    PostMeltBolt11Request, PostMeltQuoteBolt11Request, PostMeltQuoteBolt11Response,
+    PostMintBolt11Request, PostMintQuoteBolt11Response,
+  },
   types::{
     Amount, BlindSignature, BlindSignatures, BlindedMessage, BlindedMessages, PaymentMethod, Proof,
     Proofs, Unit,
@@ -28,12 +31,16 @@ pub enum WalletError {
   UnblindError(String),
   #[error("Could not mint token: `{0}`")]
   CouldNotMintToken(String),
+  #[error("Could not meltt token: `{0}`")]
+  CouldNotMeltToken(String),
   #[error("Could not verify token: `{0}`")]
   CouldNotVerifyToken(String),
   #[error("Could not mint quote: `{0}`")]
   CouldNotMintQuote(String),
   #[error("Could not check mint quote: `{0}`")]
   CouldNotCheckMintQuote(String),
+  #[error("Method not allowed: `{0}`")]
+  MethodNotAllowed(String),
 }
 
 type Result<T> = result::Result<T, WalletError>;
@@ -44,7 +51,6 @@ struct ValidAndInvalidProofs {
 }
 
 pub struct Wallet {
-  quotes: Vec<(String, Amount)>,
   mint_url: String,
   mint: Mint,
   mint_valid_keysets: Vec<KeysetWithKeys>,
@@ -60,9 +66,7 @@ impl Wallet {
     // Get all (active) keysets from mint
     let mint_valid_keysets = mint.get_v1_keys().keysets;
 
-    let quotes = wallet_db.get_all_wallet_quotes().unwrap();
     Self {
-      quotes,
       mint_url,
       mint,
       mint_valid_keysets,
@@ -78,9 +82,7 @@ impl Wallet {
     // Get all (active) keysets from mint
     let mint_valid_keysets = mint.get_v1_keys().keysets;
 
-    let quotes = wallet_db.get_all_wallet_quotes().unwrap();
     Self {
-      quotes,
       mint_url,
       mint,
       mint_valid_keysets,
@@ -90,7 +92,8 @@ impl Wallet {
 
   pub fn mint_paid_quote(&mut self, quote_id: String) -> Result<()> {
     // get amount for this quote_id
-    let amount = match self.quotes.iter().find(|(id, _)| *id == quote_id) {
+    let quotes = self.db.get_all_wallet_quotes().unwrap();
+    let amount = match quotes.iter().find(|(id, _)| *id == quote_id) {
       Some((_, amount)) => amount,
       None => {
         return Err(WalletError::CouldNotMintToken(
@@ -143,6 +146,56 @@ impl Wallet {
     let mut proofs_in_db = self.get_proofs_from_db();
     proofs_in_db.extend_from_slice(&new_proofs);
     self.save_new_proofs_to_db(proofs_in_db);
+
+    Ok(())
+  }
+
+  // TODO: unit test
+  pub fn melt_paid_quote(&mut self, quote_id: String) -> Result<()> {
+    // get amount for this quote_id
+    let quotes = self.db.get_all_wallet_quotes().unwrap();
+    let amount = match quotes.iter().find(|(id, _)| *id == quote_id) {
+      Some((_, amount)) => amount,
+      None => {
+        return Err(WalletError::CouldNotMeltToken(
+          "Quote with this ID not found".to_string(),
+        ))
+      }
+    };
+
+    let proofs: Proofs = self.get_proofs_from_db();
+
+    let mut inputs: Proofs = vec![];
+    let mut total_amount_count = 0;
+    for proof in &proofs {
+      inputs.push(proof.clone());
+      total_amount_count += proof.clone().amount;
+
+      if total_amount_count >= *amount {
+        break;
+      }
+    }
+
+    let post_melt_bolt11_request = PostMeltBolt11Request {
+      quote: quote_id,
+      inputs: inputs.clone(),
+    };
+
+    let response = match self.mint.melt(post_melt_bolt11_request) {
+      Ok(response) => response,
+      Err(err) => return Err(WalletError::CouldNotMeltToken(err.to_string())),
+    };
+
+    // If paid is true, delete used inputs
+    if response.paid {
+      let proofs_without_used_inputs: Proofs = proofs
+        .iter()
+        .filter(|proof| !inputs.contains(proof))
+        .map(|proof| proof.to_owned())
+        .collect();
+
+      self.save_new_proofs_to_db(proofs_without_used_inputs);
+    }
 
     Ok(())
   }
@@ -229,6 +282,33 @@ impl Wallet {
     Ok(mint_quote_response)
   }
 
+  // TODO: unit test
+  pub fn melt_quote(
+    &mut self,
+    method: PaymentMethod,
+    request: String,
+    unit: Unit,
+  ) -> Result<PostMeltQuoteBolt11Response> {
+    let mut mint = Mint::new();
+
+    if method != PaymentMethod::BOLT11 {
+      return Err(WalletError::MethodNotAllowed(format!("{:?}", method)));
+    }
+
+    let req = PostMeltQuoteBolt11Request { request, unit };
+
+    let melt_quote_response = match mint.melt_quote(req) {
+      Ok(melt_quote) => melt_quote,
+      Err(e) => return Err(WalletError::CouldNotMintQuote(e.to_string())),
+    };
+
+    // save quote to db
+    let total_amount = melt_quote_response.clone().amount + melt_quote_response.clone().fee_reserve;
+    self.save_quote_to_db(melt_quote_response.clone().quote, total_amount);
+
+    Ok(melt_quote_response)
+  }
+
   fn get_valid_and_invalid_proofs(&self) -> ValidAndInvalidProofs {
     let mint_valid_keyset_ids = self
       .mint_valid_keysets
@@ -296,7 +376,7 @@ impl Wallet {
     }
 
     if current_amount >= amounts_sum {
-      return inputs
+      return inputs;
     }
 
     for proof in proofs.valid_proofs {
@@ -474,7 +554,9 @@ mod tests {
 
       let mut proofs = valid_proofs;
       proofs.extend_from_slice(&invalid_proofs);
-      let _ = wallet.db.write_to_wallet_proofs_table(&wallet.mint_url, proofs);
+      let _ = wallet
+        .db
+        .write_to_wallet_proofs_table(&wallet.mint_url, proofs);
 
       Self {
         wallet,
