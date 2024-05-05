@@ -149,6 +149,12 @@ impl Mint {
     GetKeysetsResponse { keysets }
   }
 
+  // TODO: unit test
+  pub fn info(&self) {
+    // TODO: check the settings for each NUT
+    unimplemented!()
+  }
+
   pub fn swap_tokens(
     &mut self,
     inputs: Proofs,
@@ -824,7 +830,10 @@ mod tests {
     let mint_quote = sut.mint.mint_quote(method, amount, unit).unwrap();
 
     // check valid quote_id
-    let res_ok = sut.mint.check_mint_quote_state(mint_quote.clone().quote).unwrap();
+    let res_ok = sut
+      .mint
+      .check_mint_quote_state(mint_quote.clone().quote)
+      .unwrap();
     assert_eq!(res_ok.quote, mint_quote.quote);
     assert!(!res_ok.paid);
     assert_eq!(res_ok.expiry, mint_quote.expiry);

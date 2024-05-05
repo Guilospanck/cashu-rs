@@ -12,7 +12,8 @@ Work in progress.
 - [x] [NUT-03](https://github.com/cashubtc/nuts/blob/main/03.md)
 - [x] [NUT-04](https://github.com/cashubtc/nuts/blob/main/04.md)
 - [⏳] [NUT-05](https://github.com/cashubtc/nuts/blob/main/05.md)
-- [ ] [NUT-06](https://github.com/cashubtc/nuts/blob/main/06.md)
+  - Missing bolt11
+- [⏳] [NUT-06](https://github.com/cashubtc/nuts/blob/main/06.md)
 
 ## TODO
 

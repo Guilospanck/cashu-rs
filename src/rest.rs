@@ -1,3 +1,4 @@
+use bitcoin::secp256k1::PublicKey;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -48,18 +49,18 @@ impl PostMintQuoteBolt11Response {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PostMintBolt11Request {
   pub quote_id: String,
-  pub outputs: BlindedMessages
+  pub outputs: BlindedMessages,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PostMintBolt11Response {
-  pub signatures: BlindSignatures
+  pub signatures: BlindSignatures,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PostMeltQuoteBolt11Request {
   pub request: String, // bolt11 invoice to be paid
-  pub unit: Unit
+  pub unit: Unit,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -81,7 +82,7 @@ pub struct PostMeltQuoteBolt11Response {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PostMeltBolt11Request {
   pub quote: String,
-  pub inputs: Proofs
+  pub inputs: Proofs,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -90,4 +91,38 @@ pub struct PostMeltBolt11Response {
   pub paid: bool,
   /// Bolt11 payment preimage in case of a successful payment
   pub payment_preimage: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
+pub struct NutMethod {
+  pub method: String,
+  pub unit: Unit,
+  pub min_amount: Amount,
+  pub max_amount: Amount,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
+pub struct Nut {
+  pub methods: Vec<NutMethod>,
+  pub disabled: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GetInfoResponse {
+  /// Mint's name
+  pub name: String,
+  /// Mint's hex pubkey
+  pub pubkey: PublicKey,
+  /// Mint's version: is the implementation name and the version of the software running on this mint separated with a slash "/"
+  pub version: String,
+  /// Mint's description (short)
+  pub description: String,
+  /// Mint's description (long)
+  pub description_long: String,
+  /// Mint's contacts: is an array of contact methods to reach the mint operator. A contact method consists of two fields. The first denotes the method (like "email"), the second the identifier (like "contact@me.com").
+  pub contact: Vec<[String; 2]>,
+  /// It's the message of the day that the wallet must display to the user. It should only be used to display important announcements to users, such as scheduled maintenances.
+  pub motd: String,
+  /// Indicates each NUT specification that the mint supports and its settings. The settings are defined in each NUT separately.
+  pub nuts: std::collections::HashMap<String, Nut>,
 }
