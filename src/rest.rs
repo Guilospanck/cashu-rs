@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
   keyset::{Keyset, KeysetWithKeys},
-  types::{Amount, BlindSignatures, BlindedMessages, Proofs, Unit},
+  types::{Amount, BlindSignatures, BlindedMessages, PaymentMethod, Proofs, Unit},
 };
 
 pub struct GetKeysResponse {
@@ -95,10 +95,14 @@ pub struct PostMeltBolt11Response {
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
 pub struct NutMethod {
-  pub method: String,
+  pub method: PaymentMethod,
   pub unit: Unit,
   pub min_amount: Amount,
   pub max_amount: Amount,
+}
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
+pub struct NutSupported {
+  pub supported: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
@@ -107,12 +111,19 @@ pub struct Nut {
   pub disabled: bool,
 }
 
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
+#[serde(untagged)]
+pub enum NutValue {
+  Nut(Nut),
+  Supported(NutSupported),
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GetInfoResponse {
   /// Mint's name
   pub name: String,
   /// Mint's hex pubkey
-  pub pubkey: PublicKey,
+  pub pubkey: Option<PublicKey>,
   /// Mint's version: is the implementation name and the version of the software running on this mint separated with a slash "/"
   pub version: String,
   /// Mint's description (short)
@@ -124,5 +135,5 @@ pub struct GetInfoResponse {
   /// It's the message of the day that the wallet must display to the user. It should only be used to display important announcements to users, such as scheduled maintenances.
   pub motd: String,
   /// Indicates each NUT specification that the mint supports and its settings. The settings are defined in each NUT separately.
-  pub nuts: std::collections::HashMap<String, Nut>,
+  pub nuts: std::collections::HashMap<String, NutValue>,
 }

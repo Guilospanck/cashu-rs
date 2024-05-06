@@ -1,4 +1,4 @@
-use std::result;
+use std::{collections::HashMap, result};
 
 use bitcoin::{
   key::Secp256k1,
@@ -14,9 +14,10 @@ use crate::{
   helpers::hash_to_curve,
   keyset::{generate_keyset_and_keypairs, Keyset, KeysetWithKeys, Keysets},
   rest::{
-    GetKeysResponse, GetKeysetsResponse, PostMeltBolt11Request, PostMeltBolt11Response,
-    PostMeltQuoteBolt11Request, PostMeltQuoteBolt11Response, PostMintBolt11Request,
-    PostMintBolt11Response, PostMintQuoteBolt11Response,
+    GetInfoResponse, GetKeysResponse, GetKeysetsResponse, Nut, NutMethod, NutSupported, NutValue,
+    PostMeltBolt11Request, PostMeltBolt11Response, PostMeltQuoteBolt11Request,
+    PostMeltQuoteBolt11Response, PostMintBolt11Request, PostMintBolt11Response,
+    PostMintQuoteBolt11Response,
   },
   types::{
     Amount, BlindSignature, BlindSignatures, BlindedMessage, BlindedMessages, Keypairs,
@@ -150,9 +151,64 @@ impl Mint {
   }
 
   // TODO: unit test
-  pub fn info(&self) {
-    // TODO: check the settings for each NUT
-    unimplemented!()
+  pub fn info(&self) -> GetInfoResponse {
+    let mut nuts: HashMap<String, NutValue> = HashMap::new();
+
+    // NUT-04
+    let methods_nut_04 = vec![NutMethod {
+      method: PaymentMethod::BOLT11,
+      unit: Unit::SAT,
+      min_amount: 0,
+      max_amount: 10000,
+    }];
+    let nut04 = Nut {
+      methods: methods_nut_04,
+      disabled: false,
+    };
+
+    // NUT-05
+    let methods_nut_05 = vec![NutMethod {
+      method: PaymentMethod::BOLT11,
+      unit: Unit::SAT,
+      min_amount: 100,
+      max_amount: 10000,
+    }];
+    let nut05 = Nut {
+      methods: methods_nut_05,
+      disabled: false,
+    };
+
+    // NUT-07, 08, 09, 10, 12
+    let not_supported = NutValue::Supported(NutSupported { supported: false });
+
+    nuts.insert("4".to_owned(), NutValue::Nut(nut04));
+    nuts.insert("5".to_owned(), NutValue::Nut(nut05));
+    nuts.insert("7".to_owned(), not_supported.clone());
+    nuts.insert("8".to_owned(), not_supported.clone());
+    nuts.insert("9".to_owned(), not_supported.clone());
+    nuts.insert("10".to_owned(), not_supported.clone());
+    nuts.insert("12".to_owned(), not_supported);
+
+    GetInfoResponse {
+      name: "Guilospanck's mint".to_string(),
+      pubkey: None,
+      version: "cashu-rs/0.1.0".to_string(),
+      description: "A mint".to_string(),
+      description_long: "A mint but with more chars".to_string(),
+      contact: vec![
+        [
+          "email".to_string(),
+          "guilospanck@protonmail.com".to_string(),
+        ],
+        [
+          "linkedin".to_string(),
+          "https://www.linkedin.com/in/guilhermerpereira/".to_string(),
+        ],
+      ],
+      motd: "Dwell on the beauty of life. Watch the stars and see yourself running with them"
+        .to_string(),
+      nuts,
+    }
   }
 
   pub fn swap_tokens(
@@ -353,11 +409,7 @@ impl Mint {
     }
 
     // check if blinded messages amounts equal to amounts in the mint_quote from quote_id
-    let outputs_amount = outputs
-      .iter()
-      .map(|output| output.amount)
-      .reduce(|acc, e| acc + e)
-      .unwrap();
+    let outputs_amount: Amount = outputs.iter().map(|output| output.amount).sum();
 
     if mint_quote.amount != outputs_amount {
       return Err(MintError::AmountsDoNotMatch);
