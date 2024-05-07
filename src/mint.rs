@@ -150,7 +150,6 @@ impl Mint {
     GetKeysetsResponse { keysets }
   }
 
-  // TODO: unit test
   pub fn info(&self) -> GetInfoResponse {
     let mut nuts: HashMap<String, NutValue> = HashMap::new();
 
@@ -778,6 +777,89 @@ mod tests {
     fn remove_temp_db(&self) {
       fs::remove_file(format!("db/test/{}.redb", self.db_name)).unwrap();
     }
+  }
+
+  #[test]
+  fn mint_info() {
+    let sut = Sut::new("mint_info");
+
+    // test (de)serialization
+    let json_str = r#"
+    {
+      "name": "Bob's Cashu mint",
+      "pubkey": "0283bf290884eed3a7ca2663fc0260de2e2064d6b355ea13f98dec004b7a7ead99",
+      "version": "Nutshell/0.15.0",
+      "description": "The short mint description",
+      "description_long": "A description that can be a long piece of text.",
+      "contact": [
+        ["email", "contact@me.com"],
+        ["twitter", "@me"],
+        ["nostr" ,"npub..."]
+      ],  
+      "motd": "Message to display to users.",  
+      "nuts": {
+        "4": {
+          "methods": [
+            {
+              "method": "bolt11",
+              "unit": "sat",
+              "min_amount": 0,
+              "max_amount": 10000        
+            }
+          ],
+          "disabled": false
+        },
+        "5": {
+          "methods": [
+            {
+              "method": "bolt11",
+              "unit": "sat",
+              "min_amount": 100,
+              "max_amount": 10000        
+            }
+          ],
+          "disabled": false
+        },
+        "7": {"supported": true},
+        "8": {"supported": true},
+        "9": {"supported": true},
+        "10": {"supported": true},
+        "12": {"supported": true}
+      }
+    }
+    "#;
+
+    let nut04 = r#"
+      {
+        "methods": [
+          {
+            "method": "bolt11",
+            "unit": "sat",
+            "min_amount": 0,
+            "max_amount": 10000        
+          }
+        ],
+        "disabled": false
+      }
+    "#;
+    let nut04_deserialized: Nut = serde_json::from_str(nut04).unwrap();
+
+    let deserialized: GetInfoResponse = serde_json::from_str(json_str).unwrap();
+    
+    assert_eq!(deserialized.name, "Bob's Cashu mint");
+    assert_eq!(deserialized.contact[0][0], "email");
+    assert_eq!(deserialized.contact[0][1], "contact@me.com");
+    assert_eq!(deserialized.nuts.get("11"), None);
+    assert_eq!(deserialized.nuts.get("4"), Some(NutValue::Nut(nut04_deserialized.clone())).as_ref());
+
+    let mint_info = sut.mint.info();
+
+    assert_eq!(mint_info.name, "Guilospanck's mint");
+    assert_eq!(mint_info.contact[0][0], "email");
+    assert_eq!(mint_info.contact[0][1], "guilospanck@protonmail.com");
+    assert_eq!(mint_info.nuts.get("11"), None);
+    assert_eq!(mint_info.nuts.get("4"), Some(NutValue::Nut(nut04_deserialized)).as_ref());
+
   }
 
   #[test]
