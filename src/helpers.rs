@@ -43,7 +43,7 @@ fn _get_hashed_value(msg: Vec<u8>, counter: u32) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
-    use super::generate_key_pair;
+  use super::generate_key_pair;
 
   #[test]
   fn keypair_generation() {

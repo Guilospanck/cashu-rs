@@ -1,4 +1,6 @@
-use std::{collections::HashMap, result};
+use bitcoin::hashes::sha256;
+use bitcoin::hashes::Hash;
+use std::{collections::HashMap, result, str::FromStr};
 
 use bitcoin::{
   key::Secp256k1,
@@ -7,6 +9,7 @@ use bitcoin::{
 
 use chrono::Utc;
 
+use lightning_invoice::{self, Bolt11Invoice, Currency, InvoiceBuilder};
 use uuid::Uuid;
 
 use crate::{
@@ -48,6 +51,8 @@ pub enum MintError {
   MeltQuoteNotFound(String),
   #[error("Mint quote not paid")]
   MintQuoteNotPaid,
+  #[error("Invalid invoice: `{0}`")]
+  InvalidInvoice(String),
 }
 
 type Result<T> = result::Result<T, MintError>;
@@ -278,8 +283,29 @@ impl Mint {
     }
 
     let quote: String = Uuid::new_v4().to_string();
+    let private_key = SecretKey::from_slice(
+      &[
+        0xe1, 0x26, 0xf6, 0x8f, 0x7e, 0xaf, 0xcc, 0x8b, 0x74, 0xf5, 0x4d, 0x26, 0x9f, 0xe2, 0x06,
+        0xbe, 0x71, 0x50, 0x00, 0xf9, 0x4d, 0xac, 0x06, 0x7d, 0x1c, 0x04, 0xa8, 0xca, 0x3b, 0x2d,
+        0xb7, 0x34,
+      ][..],
+    )
+    .unwrap();
+    let payment_hash = sha256::Hash::from_slice(&[0; 32][..]).unwrap();
+    let payment_secret = lightning_invoice::PaymentSecret([42u8; 32]);
 
+    // Payment pre-image is the secret
+    // Payment hash is the fingerprint
     // TODO: generate bolt11 invoice using `amount` and `unit`
+    let invoice = InvoiceBuilder::new(Currency::Bitcoin)
+      .description("Invoice created".into())
+      .payment_hash(payment_hash)
+      .payment_secret(payment_secret)
+      .current_timestamp()
+      .min_final_cltv_expiry_delta(144)
+      .build_signed(|hash| Secp256k1::new().sign_ecdsa_recoverable(hash, &private_key))
+      .unwrap();
+    println!("{:?}", invoice.to_string());
     let request = "lntb30m1pw2f2yspp5s59w4a0kjecw3zyexm7zur8l8n4scw674w".to_string();
 
     let paid = false;
@@ -300,17 +326,15 @@ impl Mint {
   // TODO: unit test
   pub fn melt_quote(
     &mut self,
-    PostMeltQuoteBolt11Request {
-      request: _,
-      unit: _,
-    }: PostMeltQuoteBolt11Request,
+    PostMeltQuoteBolt11Request { request, unit: _ }: PostMeltQuoteBolt11Request,
   ) -> Result<PostMeltQuoteBolt11Response> {
     let quote: String = Uuid::new_v4().to_string();
 
-    // TODO: decode the request using bolt11 into amount, expiry etc
-    let amount: Amount = 10;
+    let bolt11_invoice = Bolt11Invoice::from_str(&request)
+      .map_err(|err| MintError::InvalidInvoice(err.to_string()))?;
+    let amount: Amount = bolt11_invoice.amount_milli_satoshis().unwrap() * 1000; // in sats
     let fee_reserve: Amount = 0;
-    let expiry: i64 = Utc::now().timestamp() + 3600;
+    let expiry: i64 = bolt11_invoice.expiry_time().as_secs() as i64;
     let paid = false;
 
     let response = PostMeltQuoteBolt11Response {
@@ -845,12 +869,15 @@ mod tests {
     let nut04_deserialized: Nut = serde_json::from_str(nut04).unwrap();
 
     let deserialized: GetInfoResponse = serde_json::from_str(json_str).unwrap();
-    
+
     assert_eq!(deserialized.name, "Bob's Cashu mint");
     assert_eq!(deserialized.contact[0][0], "email");
     assert_eq!(deserialized.contact[0][1], "contact@me.com");
     assert_eq!(deserialized.nuts.get("11"), None);
-    assert_eq!(deserialized.nuts.get("4"), Some(NutValue::Nut(nut04_deserialized.clone())).as_ref());
+    assert_eq!(
+      deserialized.nuts.get("4"),
+      Some(NutValue::Nut(nut04_deserialized.clone())).as_ref()
+    );
 
     let mint_info = sut.mint.info();
 
@@ -858,8 +885,10 @@ mod tests {
     assert_eq!(mint_info.contact[0][0], "email");
     assert_eq!(mint_info.contact[0][1], "guilospanck@protonmail.com");
     assert_eq!(mint_info.nuts.get("11"), None);
-    assert_eq!(mint_info.nuts.get("4"), Some(NutValue::Nut(nut04_deserialized)).as_ref());
-
+    assert_eq!(
+      mint_info.nuts.get("4"),
+      Some(NutValue::Nut(nut04_deserialized)).as_ref()
+    );
   }
 
   #[test]
