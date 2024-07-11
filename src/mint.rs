@@ -8,8 +8,8 @@ use bitcoin::{
 };
 
 use chrono::Utc;
-
 use lightning_invoice::{self, Bolt11Invoice, Currency, InvoiceBuilder};
+use std::time::Duration;
 use uuid::Uuid;
 
 use crate::{
@@ -291,26 +291,26 @@ impl Mint {
       ][..],
     )
     .unwrap();
+
     let payment_hash = sha256::Hash::from_slice(&[0; 32][..]).unwrap();
     let payment_secret = lightning_invoice::PaymentSecret([42u8; 32]);
 
-    // Payment pre-image is the secret
-    // Payment hash is the fingerprint
-    // TODO: generate bolt11 invoice using `amount` and `unit`
+    // valid for 1h
+    let invoice_expiry = Duration::from_secs(3600);
+
     let invoice = InvoiceBuilder::new(Currency::Bitcoin)
       .description("Invoice created".into())
       .payment_hash(payment_hash)
       .payment_secret(payment_secret)
       .current_timestamp()
       .min_final_cltv_expiry_delta(144)
+      .expiry_time(invoice_expiry)
       .build_signed(|hash| Secp256k1::new().sign_ecdsa_recoverable(hash, &private_key))
       .unwrap();
-    println!("{:?}", invoice.to_string());
-    let request = "lntb30m1pw2f2yspp5s59w4a0kjecw3zyexm7zur8l8n4scw674w".to_string();
+
+    let request = invoice.to_string();
 
     let paid = false;
-
-    // valid for 1h
     let expiry: i64 = Utc::now().timestamp() + 3600;
 
     let mint_quote = PostMintQuoteBolt11Response::new(quote, request, paid, expiry, amount);
