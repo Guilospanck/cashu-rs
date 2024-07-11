@@ -12,6 +12,7 @@ use lightning_invoice::{self, Bolt11Invoice, Currency, InvoiceBuilder};
 use std::time::Duration;
 use uuid::Uuid;
 
+use crate::helpers::sha256_hasher;
 use crate::{
   database::{CashuDatabase, DBType},
   helpers::hash_to_curve,
@@ -61,6 +62,7 @@ pub struct Mint {
   keysets: Vec<KeysetWithKeys>,
   keypairs: Keypairs,
   db: CashuDatabase,
+  secret: Vec<u8>,
 }
 
 impl Mint {
@@ -83,21 +85,26 @@ impl Mint {
       keypairs = generated_keypairs;
     }
 
+    let secret = [0; 32].to_vec();
+
     Self {
       keysets,
       keypairs,
       db,
+      secret,
     }
   }
 
   fn new_testing_mint(db_name: &str, keyset: KeysetWithKeys, keypairs: Keypairs) -> Self {
     let db = CashuDatabase::new_testing_db(db_name).unwrap();
     let keysets = vec![keyset];
+    let secret = [0; 32].to_vec();
 
     Self {
       keysets,
       keypairs,
       db,
+      secret,
     }
   }
 
@@ -291,8 +298,7 @@ impl Mint {
       ][..],
     )
     .unwrap();
-
-    let payment_hash = sha256::Hash::from_slice(&[0; 32][..]).unwrap();
+    let payment_hash = sha256::Hash::from_slice(&self.secret[..]).unwrap();
     let payment_secret = lightning_invoice::PaymentSecret([42u8; 32]);
 
     // valid for 1h
@@ -377,11 +383,13 @@ impl Mint {
       return Err(MintError::InsufficientFunds);
     }
 
-    // TODO: use bolt11 to pay amount
+    let paid = true;
+    let payment_preimage = sha256_hasher(self.secret.clone());
+    let payment_preimage = hex::encode(payment_preimage);
 
     let response = PostMeltBolt11Response {
-      paid: false,
-      payment_preimage: None,
+      paid,
+      payment_preimage: Some(payment_preimage),
     };
 
     Ok(response)
