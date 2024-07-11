@@ -652,6 +652,39 @@ mod tests {
       proofs
     }
 
+    fn gen_proofs_created_from_this_mint_millisats() -> Proofs {
+      let proof_1 = json!(
+        {
+          "id": "009a1f293253e41e", // same id as the keyset
+          "secret": "12aba1f293ae53e41e",
+          "amount": 1000,
+          "C": PublicKey::from_str("03d4150de41eb44fcad2d4e57abbb21e0674d7277a5cfe86e782a74afe299dd8f4").unwrap(),
+        }
+      );
+      let proof_2 = json!(
+        {
+          "id": "009a1f293253e41e", // same id as the keyset
+          "secret": "31baaba1f293ae53e41e",
+          "amount": 2000,
+          "C": PublicKey::from_str("02393a930aff0ed1acba8292dc13d666c22210c81183a355f060d3e73d5176ed19").unwrap(),
+        }
+      );
+      let proof_3 = json!(
+        {
+          "id": "009a1f293253e41e", // same id as the keyset
+          "secret": "44baaba1f293ae53e41e",
+          "amount": 4000,
+          "C": PublicKey::from_str("0205fc448d731e91488e3ec5c15c59dcf671edad677955cd978153302c1a5af4ea").unwrap(),
+        }
+      );
+      let proof1: Proof = serde_json::from_value(proof_1).unwrap();
+      let proof2: Proof = serde_json::from_value(proof_2).unwrap();
+      let proof3: Proof = serde_json::from_value(proof_3).unwrap();
+
+      let proofs = vec![proof1, proof2, proof3];
+      proofs
+    }
+
     fn gen_proofs_not_created_from_this_mint() -> Proofs {
       let proof_1 = json!(
         {
@@ -958,7 +991,7 @@ mod tests {
   #[test]
   fn mint_quote() {
     let mut sut = Sut::new("mint_quote");
-    let amount = 69;
+    let amount = 7;
     let unit = Unit::SAT;
     let expected_expiry = Utc::now().timestamp() + 3600;
     let expected_response = PostMintQuoteBolt11Response {
@@ -1010,6 +1043,48 @@ mod tests {
     assert_eq!(res_ok.paid, expected_response.paid);
     assert_eq!(res_ok.expiry, expected_response.expiry);
     assert_eq!(res_ok.amount, expected_response.amount);
+  }
+
+  #[test]
+  fn melt() {
+    let mut sut = Sut::new("melt");
+
+    let request = "lnbc690p1pnfqvjkdqcf9h8vmmfvdjjqcmjv4shgetypp5qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqsp59g4z52329g4z52329g4z52329g4z52329g4z52329g4z52329g4q9qrsgqcqzysxqrrss2sf0ed8mg23arqg5gwa38z3937lxpkaxxxccs89ttw7kh6dl63krwxsjrd6paxcahktsrhqq8m9zp5tyekvdq4ckx580qnwwhpg40kgqela3pz".to_string();
+    let melt_request = PostMeltQuoteBolt11Request {
+      unit: Unit::SAT,
+      request,
+    };
+    let melt_quote = sut.mint.melt_quote(melt_request).unwrap();
+    let quote = melt_quote.quote;
+    let inputs = Sut::gen_proofs_created_from_this_mint_millisats();
+
+    // Check err when quote does not exist
+    let with_inexistant_quote = PostMeltBolt11Request {
+      quote: String::from("potato"),
+      inputs: vec![],
+    };
+    let res_ok = sut.mint.melt(with_inexistant_quote);
+    assert_eq!(res_ok, Err(MintError::MeltQuoteNotFound("".to_string())));
+
+    // Check when not enough funds
+    let with_insufficient_funds = PostMeltBolt11Request {
+      quote,
+      inputs: inputs.clone(),
+    };
+    let res_ok = sut.mint.melt(with_insufficient_funds);
+    assert_eq!(res_ok, Err(MintError::InsufficientFunds));
+
+    // Check ok
+    let request = "lnbc70p1pnfq04xdqcf9h8vmmfvdjjqcmjv4shgetypp5qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqsp59g4z52329g4z52329g4z52329g4z52329g4z52329g4z52329g4q9qrsgqcqzysxqrrssxwyd49mwq9rf788v07xmgq6hhca45gtk0h3qty4m4f7cja8al79p0gpsz2rnvupujjttlxrud2ylm7ffyzakn2yl72e5wlv0wnju0tspvc99ng".to_string();
+    let melt_request = PostMeltQuoteBolt11Request {
+      unit: Unit::SAT,
+      request,
+    };
+    let melt_quote = sut.mint.melt_quote(melt_request).unwrap();
+    let quote = melt_quote.quote;
+
+    let with_sufficient_funds = PostMeltBolt11Request { quote, inputs };
+    let _ = sut.mint.melt(with_sufficient_funds).unwrap();
   }
 
   #[test]
