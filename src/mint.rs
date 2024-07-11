@@ -304,6 +304,7 @@ impl Mint {
       .payment_secret(payment_secret)
       .current_timestamp()
       .min_final_cltv_expiry_delta(144)
+      .amount_milli_satoshis(amount)
       .expiry_time(invoice_expiry)
       .build_signed(|hash| Secp256k1::new().sign_ecdsa_recoverable(hash, &private_key))
       .unwrap();
@@ -323,7 +324,6 @@ impl Mint {
     Ok(mint_quote)
   }
 
-  // TODO: unit test
   pub fn melt_quote(
     &mut self,
     PostMeltQuoteBolt11Request { request, unit: _ }: PostMeltQuoteBolt11Request,
@@ -950,7 +950,7 @@ mod tests {
   #[test]
   fn mint_quote() {
     let mut sut = Sut::new("mint_quote");
-    let amount = 1;
+    let amount = 69;
     let unit = Unit::SAT;
     let expected_expiry = Utc::now().timestamp() + 3600;
     let expected_response = PostMintQuoteBolt11Response {
@@ -958,7 +958,7 @@ mod tests {
       paid: false,
       quote: "some-random-string".to_string(),
       request: "bolt11invoicerequest".to_string(),
-      amount: 1,
+      amount,
     };
 
     // valid payment method
@@ -970,11 +970,38 @@ mod tests {
     assert_eq!(res_ok.paid, expected_response.paid);
     assert_eq!(res_ok.expiry, expected_response.expiry);
     assert!(res_ok.request.starts_with("ln"));
+    println!("{}", res_ok.request);
 
     // invalid payment method
     let payment_method = PaymentMethod::OTHER;
     let res_ok = sut.mint.mint_quote(payment_method, amount, unit);
     assert!(res_ok.is_err_and(|x| x == MintError::PaymentMethodNotSupported));
+  }
+
+  #[test]
+  fn melt_quote() {
+    let mut sut = Sut::new("melt_quote");
+    let request = "lnbc690p1pnfqvjkdqcf9h8vmmfvdjjqcmjv4shgetypp5qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqsp59g4z52329g4z52329g4z52329g4z52329g4z52329g4z52329g4q9qrsgqcqzysxqrrss2sf0ed8mg23arqg5gwa38z3937lxpkaxxxccs89ttw7kh6dl63krwxsjrd6paxcahktsrhqq8m9zp5tyekvdq4ckx580qnwwhpg40kgqela3pz".to_string();
+
+    let melt_request = PostMeltQuoteBolt11Request {
+      unit: Unit::SAT,
+      request,
+    };
+
+    let amount = 69;
+    let expected_expiry = 3600;
+    let expected_response = PostMeltQuoteBolt11Response {
+      expiry: expected_expiry,
+      paid: false,
+      quote: "some-random-string".to_string(),
+      amount: amount * 1000,
+      fee_reserve: 0,
+    };
+
+    let res_ok = sut.mint.melt_quote(melt_request).unwrap();
+    assert_eq!(res_ok.paid, expected_response.paid);
+    assert_eq!(res_ok.expiry, expected_response.expiry);
+    assert_eq!(res_ok.amount, expected_response.amount);
   }
 
   #[test]
