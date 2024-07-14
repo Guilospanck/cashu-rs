@@ -64,6 +64,8 @@ pub struct Mint {
   keypairs: Keypairs,
   db: CashuDatabase,
   private_key: SecretKey,
+  // This is different for each payment
+  // Think of it as an ID of the invoice
   payment_preimage: Option<Vec<u8>>,
 }
 
@@ -313,6 +315,9 @@ impl Mint {
     self.payment_preimage = Some(payment_preimage.clone());
     let payment_hash = sha256::Hash::from_slice(&payment_preimage[..]).unwrap();
 
+    // This changes for each hop (lightning node in the way
+    // until the final node, which will also have a different
+    // payment_secret)
     let payment_secret = lightning_invoice::PaymentSecret([42u8; 32]);
 
     // valid for 1h
