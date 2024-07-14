@@ -62,7 +62,8 @@ pub struct Mint {
   keysets: Vec<KeysetWithKeys>,
   keypairs: Keypairs,
   db: CashuDatabase,
-  secret: Vec<u8>,
+  payment_preimage: Vec<u8>,
+  private_key: SecretKey,
 }
 
 impl Mint {
@@ -85,26 +86,44 @@ impl Mint {
       keypairs = generated_keypairs;
     }
 
-    let secret = [0; 32].to_vec();
+    let payment_preimage = [0; 32].to_vec();
+    let private_key = SecretKey::from_slice(
+      &[
+        0xe1, 0x26, 0xf6, 0x8f, 0x7e, 0xaf, 0xcc, 0x8b, 0x74, 0xf5, 0x4d, 0x26, 0x9f, 0xe2, 0x06,
+        0xbe, 0x71, 0x50, 0x00, 0xf9, 0x4d, 0xac, 0x06, 0x7d, 0x1c, 0x04, 0xa8, 0xca, 0x3b, 0x2d,
+        0xb7, 0x34,
+      ][..],
+    )
+    .unwrap();
 
     Self {
       keysets,
       keypairs,
       db,
-      secret,
+      payment_preimage,
+      private_key,
     }
   }
 
   fn new_testing_mint(db_name: &str, keyset: KeysetWithKeys, keypairs: Keypairs) -> Self {
     let db = CashuDatabase::new_testing_db(db_name).unwrap();
     let keysets = vec![keyset];
-    let secret = [0; 32].to_vec();
+    let payment_preimage = [0; 32].to_vec();
+    let private_key = SecretKey::from_slice(
+      &[
+        0xe1, 0x26, 0xf6, 0x8f, 0x7e, 0xaf, 0xcc, 0x8b, 0x74, 0xf5, 0x4d, 0x26, 0x9f, 0xe2, 0x06,
+        0xbe, 0x71, 0x50, 0x00, 0xf9, 0x4d, 0xac, 0x06, 0x7d, 0x1c, 0x04, 0xa8, 0xca, 0x3b, 0x2d,
+        0xb7, 0x34,
+      ][..],
+    )
+    .unwrap();
 
     Self {
       keysets,
       keypairs,
       db,
-      secret,
+      payment_preimage,
+      private_key,
     }
   }
 
@@ -290,15 +309,7 @@ impl Mint {
     }
 
     let quote: String = Uuid::new_v4().to_string();
-    let private_key = SecretKey::from_slice(
-      &[
-        0xe1, 0x26, 0xf6, 0x8f, 0x7e, 0xaf, 0xcc, 0x8b, 0x74, 0xf5, 0x4d, 0x26, 0x9f, 0xe2, 0x06,
-        0xbe, 0x71, 0x50, 0x00, 0xf9, 0x4d, 0xac, 0x06, 0x7d, 0x1c, 0x04, 0xa8, 0xca, 0x3b, 0x2d,
-        0xb7, 0x34,
-      ][..],
-    )
-    .unwrap();
-    let payment_hash = sha256::Hash::from_slice(&self.secret[..]).unwrap();
+    let payment_hash = sha256::Hash::from_slice(&self.payment_preimage[..]).unwrap();
     let payment_secret = lightning_invoice::PaymentSecret([42u8; 32]);
 
     // valid for 1h
@@ -312,7 +323,7 @@ impl Mint {
       .min_final_cltv_expiry_delta(144)
       .amount_milli_satoshis(amount)
       .expiry_time(invoice_expiry)
-      .build_signed(|hash| Secp256k1::new().sign_ecdsa_recoverable(hash, &private_key))
+      .build_signed(|hash| Secp256k1::new().sign_ecdsa_recoverable(hash, &self.private_key))
       .unwrap();
 
     let request = invoice.to_string();
@@ -359,7 +370,6 @@ impl Mint {
     Ok(response)
   }
 
-  // TODO: unit test
   pub fn melt(
     &self,
     PostMeltBolt11Request { quote, inputs }: PostMeltBolt11Request,
@@ -384,7 +394,7 @@ impl Mint {
     }
 
     let paid = true;
-    let payment_preimage = sha256_hasher(self.secret.clone());
+    let payment_preimage = sha256_hasher(self.payment_preimage.clone());
     let payment_preimage = hex::encode(payment_preimage);
 
     let response = PostMeltBolt11Response {
