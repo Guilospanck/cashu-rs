@@ -12,7 +12,6 @@ use lightning_invoice::{self, Bolt11Invoice, Currency, InvoiceBuilder};
 use std::time::Duration;
 use uuid::Uuid;
 
-use crate::helpers::sha256_hasher;
 use crate::{
   database::{CashuDatabase, DBType},
   helpers::hash_to_curve,
@@ -54,6 +53,8 @@ pub enum MintError {
   MintQuoteNotPaid,
   #[error("Invalid invoice: `{0}`")]
   InvalidInvoice(String),
+  #[error("Payment preimage not found")]
+  PaymentPreimageNotFound,
 }
 
 type Result<T> = result::Result<T, MintError>;
@@ -62,8 +63,8 @@ pub struct Mint {
   keysets: Vec<KeysetWithKeys>,
   keypairs: Keypairs,
   db: CashuDatabase,
-  payment_preimage: Vec<u8>,
   private_key: SecretKey,
+  payment_preimage: Option<Vec<u8>>,
 }
 
 impl Mint {
@@ -86,7 +87,6 @@ impl Mint {
       keypairs = generated_keypairs;
     }
 
-    let payment_preimage = [0; 32].to_vec();
     let private_key = SecretKey::from_slice(
       &[
         0xe1, 0x26, 0xf6, 0x8f, 0x7e, 0xaf, 0xcc, 0x8b, 0x74, 0xf5, 0x4d, 0x26, 0x9f, 0xe2, 0x06,
@@ -100,15 +100,14 @@ impl Mint {
       keysets,
       keypairs,
       db,
-      payment_preimage,
       private_key,
+      payment_preimage: None,
     }
   }
 
   fn new_testing_mint(db_name: &str, keyset: KeysetWithKeys, keypairs: Keypairs) -> Self {
     let db = CashuDatabase::new_testing_db(db_name).unwrap();
     let keysets = vec![keyset];
-    let payment_preimage = [0; 32].to_vec();
     let private_key = SecretKey::from_slice(
       &[
         0xe1, 0x26, 0xf6, 0x8f, 0x7e, 0xaf, 0xcc, 0x8b, 0x74, 0xf5, 0x4d, 0x26, 0x9f, 0xe2, 0x06,
@@ -122,8 +121,8 @@ impl Mint {
       keysets,
       keypairs,
       db,
-      payment_preimage,
       private_key,
+      payment_preimage: None,
     }
   }
 
@@ -309,7 +308,11 @@ impl Mint {
     }
 
     let quote: String = Uuid::new_v4().to_string();
-    let payment_hash = sha256::Hash::from_slice(&self.payment_preimage[..]).unwrap();
+
+    let payment_preimage = [0; 32].to_vec();
+    self.payment_preimage = Some(payment_preimage.clone());
+    let payment_hash = sha256::Hash::from_slice(&payment_preimage[..]).unwrap();
+
     let payment_secret = lightning_invoice::PaymentSecret([42u8; 32]);
 
     // valid for 1h
@@ -394,7 +397,12 @@ impl Mint {
     }
 
     let paid = true;
-    let payment_preimage = sha256_hasher(self.payment_preimage.clone());
+
+    let payment_preimage = match self.payment_preimage.clone() {
+      Some(preimage) => preimage,
+      None => return Err(MintError::PaymentPreimageNotFound),
+    };
+
     let payment_preimage = hex::encode(payment_preimage);
 
     let response = PostMeltBolt11Response {
@@ -1085,6 +1093,7 @@ mod tests {
     assert_eq!(res_ok, Err(MintError::InsufficientFunds));
 
     // Check ok
+    sut.mint.payment_preimage = Some([0; 32].to_vec());
     let request = "lnbc70p1pnfq04xdqcf9h8vmmfvdjjqcmjv4shgetypp5qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqsp59g4z52329g4z52329g4z52329g4z52329g4z52329g4z52329g4q9qrsgqcqzysxqrrssxwyd49mwq9rf788v07xmgq6hhca45gtk0h3qty4m4f7cja8al79p0gpsz2rnvupujjttlxrud2ylm7ffyzakn2yl72e5wlv0wnju0tspvc99ng".to_string();
     let melt_request = PostMeltQuoteBolt11Request {
       unit: Unit::SAT,
