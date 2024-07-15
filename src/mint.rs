@@ -431,7 +431,6 @@ impl Mint {
     }
   }
 
-  // TODO: unit tests
   pub fn check_melt_quote_state(&self, quote_id: String) -> Result<PostMeltQuoteBolt11Response> {
     match self.db.get_melt_quote(quote_id) {
       Ok(res) => {
@@ -1134,6 +1133,32 @@ mod tests {
     assert_eq!(res_ok.quote, mint_quote.quote);
     assert!(!res_ok.paid);
     assert_eq!(res_ok.expiry, mint_quote.expiry);
+  }
+
+  #[test]
+  fn check_melt_quote_state() {
+    let mut sut = Sut::new("check_melt_quote_state");
+    let invalid_quote_id = "invalidquoteid".to_string();
+
+    // check invalid quote
+    let res_ok = sut.mint.check_melt_quote_state(invalid_quote_id);
+    assert!(res_ok.is_err_and(|x| matches!(x, MintError::MeltQuoteNotFound(_))));
+
+    // melt quote
+    let unit = Unit::SAT;
+    let request = "lnbc70p1pnfq04xdqcf9h8vmmfvdjjqcmjv4shgetypp5qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqsp59g4z52329g4z52329g4z52329g4z52329g4z52329g4z52329g4q9qrsgqcqzysxqrrssxwyd49mwq9rf788v07xmgq6hhca45gtk0h3qty4m4f7cja8al79p0gpsz2rnvupujjttlxrud2ylm7ffyzakn2yl72e5wlv0wnju0tspvc99ng".to_string();
+    let params = PostMeltQuoteBolt11Request { request, unit };
+
+    let melt_quote = sut.mint.melt_quote(params).unwrap();
+
+    // check valid quote_id
+    let res_ok = sut
+      .mint
+      .check_melt_quote_state(melt_quote.clone().quote)
+      .unwrap();
+    assert_eq!(res_ok.quote, melt_quote.quote);
+    assert!(!res_ok.paid);
+    assert_eq!(res_ok.expiry, melt_quote.expiry);
   }
 
   #[test]
