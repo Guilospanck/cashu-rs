@@ -150,7 +150,6 @@ impl Wallet {
     Ok(())
   }
 
-  // TODO: unit test
   pub fn melt_paid_quote(&mut self, quote_id: String) -> Result<()> {
     // get amount for this quote_id
     let quotes = self.db.get_all_wallet_quotes().unwrap();
@@ -282,7 +281,6 @@ impl Wallet {
     Ok(mint_quote_response)
   }
 
-  // TODO: unit test
   pub fn melt_quote(
     &mut self,
     method: PaymentMethod,

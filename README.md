@@ -11,10 +11,5 @@ Work in progress.
 - [x] [NUT-02](https://github.com/cashubtc/nuts/blob/main/02.md)
 - [x] [NUT-03](https://github.com/cashubtc/nuts/blob/main/03.md)
 - [x] [NUT-04](https://github.com/cashubtc/nuts/blob/main/04.md)
-- [⏳] [NUT-05](https://github.com/cashubtc/nuts/blob/main/05.md)
-  - Missing bolt11
-- [⏳] [NUT-06](https://github.com/cashubtc/nuts/blob/main/06.md)
-
-## TODO
-
-Implement the mint server. Right now it is using it as a "library".
+- [x] [NUT-05](https://github.com/cashubtc/nuts/blob/main/05.md)
+- [x] [NUT-06](https://github.com/cashubtc/nuts/blob/main/06.md)

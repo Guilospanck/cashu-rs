@@ -301,7 +301,6 @@ impl CashuDatabase {
     Ok(mint_quotes)
   }
 
-  // TODO: unit test
   pub fn write_to_melt_quotes_table(&mut self, v: PostMeltQuoteBolt11Response) -> Result<()> {
     let quote_id = v.clone().quote;
     let melt_quote_serialized = serde_json::to_string(&v)?;
@@ -314,7 +313,6 @@ impl CashuDatabase {
     Ok(())
   }
 
-  // TODO: unit test
   pub fn get_melt_quote(&self, quote_id: String) -> Result<Option<PostMeltQuoteBolt11Response>> {
     let read_txn = self.db.begin_read()?;
     let table = read_txn.open_table(Self::MINT_MELT_QUOTES_TABLE)?;
@@ -328,7 +326,6 @@ impl CashuDatabase {
     Ok(response)
   }
 
-  // TODO: unit test
   pub fn get_all_melt_quotes(&self) -> Result<Vec<PostMeltQuoteBolt11Response>> {
     let mut mint_quotes: Vec<PostMeltQuoteBolt11Response> = vec![];
     let read_txn = self.db.begin_read()?;
@@ -567,6 +564,32 @@ mod tests {
       [quote1, quote2, quote3].to_vec()
     }
 
+    fn gen_melt_quotes(&self) -> Vec<PostMeltQuoteBolt11Response> {
+      let quote1 = PostMeltQuoteBolt11Response {
+        expiry: 1714038710,
+        quote: "f3091ac2-3ba7-442e-a330-2d12bf5d3a95".to_string(),
+        paid: false,
+        fee_reserve: 0,
+        amount: 1,
+      };
+      let quote2 = PostMeltQuoteBolt11Response {
+        expiry: 1814038710,
+        quote: "e3091ac2-3ba7-442e-a330-2d12bf5d3a95".to_string(),
+        paid: true,
+        fee_reserve: 0,
+        amount: 2,
+      };
+      let quote3 = PostMeltQuoteBolt11Response {
+        expiry: 1914038710,
+        quote: "d3091ac2-3ba7-442e-a330-2d12bf5d3a95".to_string(),
+        paid: false,
+        fee_reserve: 0,
+        amount: 4,
+      };
+
+      [quote1, quote2, quote3].to_vec()
+    }
+
     fn remove_temp_db(&self) {
       fs::remove_file(format!("db/test/{}.redb", self.db_name)).unwrap();
     }
@@ -689,6 +712,35 @@ mod tests {
   }
 
   #[test]
+  fn write_to_melt_quotes_table() {
+    // arrange
+    let mut sut = Sut::new("write_to_melt_quotes_table");
+    let mock_melt_quotes = sut.gen_melt_quotes();
+
+    // act
+    let result = sut.db.get_all_melt_quotes().unwrap();
+    assert_eq!(result.len(), 0);
+    let _ = sut
+      .db
+      .write_to_melt_quotes_table(mock_melt_quotes[0].clone());
+    let _ = sut
+      .db
+      .write_to_melt_quotes_table(mock_melt_quotes[1].clone());
+    let _ = sut
+      .db
+      .write_to_melt_quotes_table(mock_melt_quotes[2].clone());
+
+    let result = sut.db.get_all_melt_quotes().unwrap();
+    assert_eq!(result.len(), 3);
+
+    let res = sut
+      .db
+      .get_melt_quote(mock_melt_quotes[1].clone().quote)
+      .unwrap();
+    assert_eq!(res, Some(mock_melt_quotes[1].clone()));
+  }
+
+  #[test]
   fn write_to_wallet_quotes_table() {
     // arrange
     let mut sut = Sut::new("write_to_wallet_quotes_table");
@@ -796,10 +848,29 @@ mod tests {
   }
 
   #[test]
+  fn get_melt_quote() {
+    let sut = Sut::new("get_melt_quote");
+    let quote_id = "some-random=id".to_string();
+
+    let result = sut.db.get_melt_quote(quote_id).unwrap();
+
+    assert!(result.is_none());
+  }
+
+  #[test]
   fn get_all_mint_quotes() {
     let sut = Sut::new("get_all_mint_quotes");
 
     let result = sut.db.get_all_mint_quotes().unwrap();
+
+    assert_eq!(result.len(), 0);
+  }
+
+  #[test]
+  fn get_all_melt_quotes() {
+    let sut = Sut::new("get_all_melt_quotes");
+
+    let result = sut.db.get_all_melt_quotes().unwrap();
 
     assert_eq!(result.len(), 0);
   }
